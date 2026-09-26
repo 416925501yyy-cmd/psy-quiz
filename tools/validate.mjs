@@ -68,6 +68,36 @@ for (const bank of sandbox.window.__BANKS || []) {
 }
 
 console.log('题量统计：', typeCount, '总计', total);
+
+/* ---------------- 背诵手册卡片自检 ---------------- */
+const CARD_TYPES = ['term', 'short', 'essay', 'table', 'exp'];
+const cardSeen = new Map();
+const cardTypes = {};
+let cardTotal = 0;
+
+for (const bank of sandbox.window.__RECITE || []) {
+  for (const ch of bank.chapters) {
+    for (const it of ch.cards) {
+      cardTotal++;
+      const where = `[背诵 ${bank.subject} / ${ch.name}] ${String(it.k).slice(0, 24)}…`;
+      cardTypes[it.t] = (cardTypes[it.t] || 0) + 1;
+
+      if (!it.k || !String(it.k).trim()) problems.push(`${where} 卡片正面为空`);
+      if (!it.a || String(it.a).trim().length < 8) problems.push(`${where} 卡片背面过短或缺失`);
+      if (!CARD_TYPES.includes(it.t)) problems.push(`${where} 未知卡片类型 ${it.t}`);
+      if (!Number.isInteger(it.f) || it.f < 1 || it.f > 3) problems.push(`${where} 考频 f 应为 1-3（${it.f}）`);
+      if (String(it.a).includes('\\n') && !String(it.a).includes('\n')) {
+        problems.push(`${where} 换行写成了字面 \\n，要注意转义`);
+      }
+
+      const key = bank.subject + '|' + String(it.k).replace(/\s/g, '');
+      if (cardSeen.has(key)) problems.push(`${where} 卡片标题重复，与「${cardSeen.get(key)}」相同`);
+      else cardSeen.set(key, where);
+    }
+  }
+}
+console.log('背诵卡片：', cardTypes, '总计', cardTotal);
+
 if (warnings.length) {
   console.log(`\n${warnings.length} 条建议（不算错误）：`);
   for (const w of warnings) console.log('  ! ' + w);

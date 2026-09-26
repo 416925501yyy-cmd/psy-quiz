@@ -383,6 +383,54 @@ html[data-theme="dark"] .icon-btn{border-color:var(--line)}
 .qprog i{display:block;height:100%;background:var(--accent);transition:width .25s}
 
 /* ---------- 结果页 ---------- */
+.btn.big{padding:15px 18px;font-size:16px;border-radius:14px}
+
+/* ---------- 背诵手册 ---------- */
+.rcard{
+  margin-top:14px;background:var(--card);border-radius:20px;
+  padding:18px 16px;box-shadow:var(--shadow);border:1px solid transparent;
+  min-height:44vh;display:flex;flex-direction:column;
+  transition:box-shadow .2s;
+}
+html[data-theme="dark"] .rcard{border-color:var(--line)}
+.rcard.flipped{box-shadow:var(--shadow-lg)}
+.rcard-ch{font-size:12.5px;color:var(--sub);margin-bottom:10px}
+.rcard-title{
+  font-size:20px;font-weight:700;line-height:1.5;letter-spacing:.2px;
+  text-align:center;margin:auto 0;
+}
+.rcard.flipped .rcard-title{
+  font-size:16.5px;font-weight:650;text-align:left;margin:0 0 12px;
+  padding-bottom:12px;border-bottom:1px dashed var(--line);
+}
+.rcard-hint{margin:auto 0;text-align:center;color:var(--sub);font-size:14px;line-height:1.9}
+.rcard-hint-ic{font-size:30px;margin-bottom:8px;opacity:.55}
+.rcard-body{flex:1}
+.rcard-answer{font-size:15.5px;line-height:1.9;white-space:pre-wrap;word-break:break-word}
+.rcard-tip{
+  margin-top:14px;padding:10px 12px;border-radius:12px;
+  background:var(--warn-soft);font-size:13.5px;line-height:1.7;
+}
+.rcard-state{margin-top:12px;font-size:12.5px;font-weight:600}
+.rcard-state.no{color:var(--bad)}
+.rcard-state.vague{color:var(--warn)}
+
+.btn.rc-no{background:var(--bad-soft);color:var(--bad);box-shadow:none}
+.btn.rc-vague{background:var(--warn-soft);color:var(--warn);box-shadow:none}
+.btn.rc-ok{background:var(--ok-soft);color:var(--ok);box-shadow:none}
+.btn.rc-no,.btn.rc-vague,.btn.rc-ok{padding:13px 6px;font-size:14.5px;white-space:nowrap}
+.btn.rc-no:active,.btn.rc-vague:active,.btn.rc-ok:active{transform:scale(.97)}
+
+.chips{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 6px;-webkit-overflow-scrolling:touch}
+.chips::-webkit-scrollbar{display:none}
+.chip{
+  flex:0 0 auto;padding:7px 14px;border-radius:99px;font-size:13px;font-weight:550;
+  background:var(--card);color:var(--sub);border:1.5px solid var(--line);
+}
+.chip.on{background:var(--accent);color:#fff;border-color:transparent}
+.rc-item + .rc-item{border-top:1px solid var(--line)}
+.rc-item-body{padding:0 15px 15px;animation:fadeUp .2s ease}
+
 .result{text-align:center;padding:26px 18px}
 .result .ring{
   width:132px;height:132px;margin:0 auto 16px;border-radius:50%;

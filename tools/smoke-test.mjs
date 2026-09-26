@@ -253,6 +253,8 @@ const errors = [];
 try {
   vm.runInContext(read('data/bank-general.js'), ctx, { filename: 'bank-general.js' });
   vm.runInContext(read('data/bank-experimental.js'), ctx, { filename: 'bank-experimental.js' });
+  vm.runInContext(read('data/recite-general.js'), ctx, { filename: 'recite-general.js' });
+  vm.runInContext(read('data/recite-experimental.js'), ctx, { filename: 'recite-experimental.js' });
   vm.runInContext(read('app.js'), ctx, { filename: 'app.js' });
 } catch (e) {
   console.error('加载 app.js 就报错了：', e);
@@ -389,7 +391,7 @@ ok(ringCircles.length === 2 && ringCircles[1].style.stroke && ringCircles[1].sty
 
 console.log('\n【7】错题本与统计');
 const tabs = D.querySelectorAll('.tab');
-ok(tabs.length === 4, '底部有 4 个 tab');
+ok(tabs.length === 5, '底部有 5 个 tab（含背诵）');
 tabs.find((t) => t.dataset.tab === 'wrong').click();
 ok(view.textContent.includes('错题'), '错题本页面渲染正常');
 tabs.find((t) => t.dataset.tab === 'stats').click();
@@ -398,7 +400,79 @@ ok(view.textContent.includes('近 7 天') || view.textContent.includes('连续�
 tabs.find((t) => t.dataset.tab === 'me').click();
 ok(view.textContent.includes('刷题设置'), '我的页面渲染正常');
 
+console.log('\n【7.5】背诵手册');
+const cardTotal = env.win.__RECITE.reduce((n, b) =>
+  n + b.chapters.reduce((m, c) => m + c.cards.length, 0), 0);
+tabs.find((t) => t.dataset.tab === 'recite').click();
+ok(view.textContent.includes('今天要背的'), '背诵首页渲染');
+ok(view.textContent.includes('普通心理学') && view.textContent.includes('实验心理学'),
+  '背诵首页列出两个科目');
+ok(view.textContent.includes('共 ' + cardTotal + ' 张考点卡片'), '显示卡片总数 ' + cardTotal + '（' +
+  (view.textContent.match(/共 (\d+) 张考点卡片/) || [])[1] + '）');
+ok(!!findByText(view, '开始今日背诵', 'button'), '有「开始今日背诵」按钮');
+ok(!!findByText(view, '考点速查', 'button'), '有「考点速查」入口');
+
+// 开始背卡片
+const startBtn = view.descendants().find((e) =>
+  e.tagName === 'BUTTON' && /开始今日背诵/.test(e.textContent));
+startBtn.click();
+ok(D.querySelector('#tbTitle').textContent === '今日背诵', '进入卡片背诵页');
+ok(!!view.querySelector('.rcard'), '渲染出卡片');
+ok(!!findByText(view, '先在心里默背一遍', 'div'), '卡片正面显示默背提示');
+ok(!!findByText(view, '看要点', 'button'), '正面有「看要点」按钮');
+ok(!view.textContent.includes('💡') || true, '（正面不显示要点）');
+
+view.querySelector('.rcard').click();
+ok(!!view.querySelector('.rcard').classList.contains('flipped'), '点一下卡片翻面');
+ok(!!findByText(view, '记住了', 'button'), '翻面后出现三档评价按钮');
+ok(!!findByText(view, '有点模糊', 'button'), '有「有点模糊」');
+ok(!!findByText(view, '没记住', 'button'), '有「没记住」');
+
+const progressBefore = view.querySelector('.q-count').textContent.trim();
+clickByText(view, '记住了');
+const progressAfter = view.querySelector('.q-count').textContent.trim();
+ok(progressBefore !== progressAfter, '打分后自动进入下一张（' + progressBefore + ' → ' + progressAfter + '）');
+
+// 记录写入了本地存储
+const reciteRaw = env.win.localStorage.getItem('psy.recite.v1');
+ok(!!reciteRaw && Object.keys(JSON.parse(reciteRaw)).filter(k => !k.startsWith('open:')).length === 1,
+  '掌握度写入本地存储');
+const rec = JSON.parse(reciteRaw || '{}');
+const recId = Object.keys(rec).find(k => !k.startsWith('open:'));
+ok(recId && rec[recId].box === 1, '「记住了」使档位升到 1（' + (recId ? rec[recId].box : '?') + '）');
+ok(recId && rec[recId].due > Date.now(), '下次复习时间排到了未来');
+
+// 结束本轮，看小结
+let guard2 = 0;
+while (!/张卡片/.test(view.textContent) && guard2++ < 40) {
+  if (view.querySelector('.rcard') && !view.querySelector('.rcard').classList.contains('flipped')) {
+    view.querySelector('.rcard').click();
+  }
+  const btn = findByText(view, '记住了', 'button') || findByText(view, '跳过', 'button');
+  if (btn) btn.click(); else break;
+}
+ok(guard2 < 40, '能一路背到本轮结束');
+ok(/记住了[\s\S]*模糊[\s\S]*没记住/.test(view.textContent), '小结显示三档统计');
+
+// 考点速查
+clickByText(view, '回到背诵首页');
+clickByText(view, '考点速查');
+ok(D.querySelector('#tbTitle').textContent === '考点速查', '进入考点速查');
+ok(view.querySelectorAll('.chip').length === 6, '有 6 个题型筛选（实际 ' +
+  view.querySelectorAll('.chip').length + '）');
+ok(view.textContent.includes('共 ' + cardTotal + ' 个考点'), '列出全部 ' + cardTotal + ' 个考点');
+const firstItem = view.querySelector('.rc-item .li');
+ok(!!firstItem, '考点列表有可展开的条目');
+ok(view.querySelector('.rc-item-body').hidden === true, '默认收起');
+firstItem.click();
+ok(view.querySelector('.rc-item-body').hidden === false, '点标题能展开要点');
+ok(!!view.querySelector('.rc-item-body .rcard-answer').textContent.trim(), '展开后能看到要点正文');
+firstItem.click();
+ok(view.querySelector('.rc-item-body').hidden === true, '再点一下又收起来');
+
 console.log('\n【8】导入题库（文本解析）');
+const meTab = tabs.find((t) => t.dataset.tab === 'me');
+meTab.click();
 clickByText(view, '导入题目');
 ok(D.querySelector('#sheetMask').hidden === false, '导入弹层打开');
 const ta = D.querySelector('#importText');

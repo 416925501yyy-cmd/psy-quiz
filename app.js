@@ -135,6 +135,7 @@ const K = {
   sess:   'psy.sess.v1',    // 上次未完成的练习（用于「继续上次」）
   custom: 'psy.custom.v1',  // 用户导入的题目
   days:   'psy.days.v1',    // 每日刷题量 { '2026-09-26': 42 }
+  recite: 'psy.recite.v1',  // 背诵手册：每张卡片的掌握度与复习时间
   meta:   'psy.meta.v1'     // 首次使用等
 };
 
@@ -147,6 +148,7 @@ const DEFAULT_SET = {
   autoRemoveWrong: true,// 答对后自动移出错题本
   haptic: true,         // 触感反馈
   daily: 15,            // 每日一练题量
+  cardDaily: 20,        // 每天新背多少张卡片
   reciteAll: false      // 背题模式：直接显示答案
 };
 
@@ -399,7 +401,7 @@ function confirmSheet(title, msg, okLabel, onOk) {
 const nav = [];
 let current = null;
 
-const TAB_OF = { home: 'home', wrong: 'wrong', stats: 'stats', me: 'me' };
+const TAB_OF = { home: 'home', recite: 'recite', wrong: 'wrong', stats: 'stats', me: 'me' };
 
 function go(route) {           // 压栈跳转
   if (current) nav.push(current);
@@ -417,6 +419,10 @@ function reset(route) {        // 清栈跳转（底部 tab）
 
 const TITLES = {
   home: '心理学刷题',
+  recite: '背诵手册',
+  reciteChapters: '选择章节',
+  reciteCards: '背卡片',
+  reciteList: '考点速查',
   subject: '选择章节',
   practice: '刷题',
   result: '练习结果',
@@ -1364,6 +1370,30 @@ VIEWS.me = function () {
       )
     ),
 
+    /* 背诵 */
+    h('div', { class: 'sec' },
+      h('div', { class: 'sec-hd' }, h('h2', null, '背诵手册')),
+      h('div', { class: 'list' },
+        h('div', { class: 'sw' },
+          h('div', { class: 'grow' },
+            h('b', null, '每天新卡数量'),
+            h('span', null, '先复习到期的，再补新卡到这个数')
+          ),
+          h('div', { class: 'seg', style: { width: '170px' } },
+            [10, 15, 20, 30, 50].map(n => h('button', {
+              class: SET.cardDaily === n ? 'on' : '',
+              onClick: (e) => {
+                SET.cardDaily = n; saveSet();
+                $$('button', e.target.parentNode).forEach(b => b.classList.remove('on'));
+                e.target.classList.add('on');
+              }
+            }, n))
+          )
+        ),
+        liRow('📖', '背诵手册', '考点卡片 + 艾宾浩斯复习', () => reset({ name: 'recite' }))
+      )
+    ),
+
     /* 外观 */
     h('div', { class: 'sec' },
       h('div', { class: 'sec-hd' }, h('h2', null, '外观')),
@@ -1430,8 +1460,8 @@ VIEWS.me = function () {
           '会清空所有本地数据，包括做题记录和导入的题目。这个操作不能撤销。',
           '确定清空',
           () => {
-            [K.prog, K.fav, K.set, K.sess, K.custom, K.days].forEach(LS.del);
-            PROG = {}; FAV = []; DAYS = {}; SET = Object.assign({}, DEFAULT_SET);
+            [K.prog, K.fav, K.set, K.sess, K.custom, K.days, K.recite].forEach(LS.del);
+            PROG = {}; FAV = []; DAYS = {}; RECITE = {}; SET = Object.assign({}, DEFAULT_SET);
             applyTheme(); applyFont();
             toast('已恢复出厂设置');
             reset({ name: 'home' });
@@ -1955,6 +1985,12 @@ function openHelpSheet() {
       '「我的 → 导入题目」，把题目按示例格式粘贴进去即可，不用改代码。',
       '格式：题干一行，选项每行以 A. B. C. D. 开头，再写「答案：」和「解析：」。',
       '判断题直接写「答案：对 / 错」。名词解释用「名词解释：xxx」，简答用「简答：xxx」。',
+      h('span', { class: 'lbl', style: { marginTop: '12px' } }, '三·五、背诵手册怎么用'),
+      '底部「背诵」页是考点卡片库：正面是考点标题，点一下翻面看要点，',
+      '然后按「没记住 / 有点模糊 / 记住了」给自己打分。',
+      '记住的卡片会按 1、2、4、7、15、30 天自动排进「今日背诵」里再出现，',
+      '没记住的当天就回来。只想突击没背熟的，就点「只背没记住的」。',
+      '想当手册翻，用「考点速查」，点标题就能展开要点。',
       h('span', { class: 'lbl', style: { marginTop: '12px' } }, '四、怎么放到手机上'),
       '把这个文件夹用微信 / 邮件传到手机，用浏览器打开 index.html 即可；',
       '如果是放在网站上的版本，打开后点浏览器菜单里的「添加到主屏幕」，',
@@ -1967,7 +2003,480 @@ function openHelpSheet() {
 }
 
 /* ==========================================================================
-   15. 交互：手势 / 键盘 / 事件绑定
+   15. 背诵手册
+   ========================================================================== */
+
+const CARDS = [];              // 全部考点卡片
+const CARD_BY_ID = new Map();
+const CARD_SUBJECTS = [];      // [{name, icon, desc, count, ids, chapters:[{name, ids}]}]
+let RECITE = LS.get(K.recite, {});
+
+const CARD_TYPE_NAME = {
+  term:  '名词解释',
+  short: '简答要点',
+  essay: '论述框架',
+  table: '易混对比',
+  exp:   '经典实验'
+};
+const CARD_TYPE_ORDER = ['term', 'short', 'essay', 'table', 'exp'];
+
+/* 艾宾浩斯复习间隔（天），下标 = 掌握档位 */
+const SRS_DAYS = [0, 1, 2, 4, 7, 15, 30];
+
+function loadReciteBank(bank) {
+  if (!bank || !bank.subject || !Array.isArray(bank.chapters)) return;
+  let subj = CARD_SUBJECTS.find(s => s.name === bank.subject);
+  if (!subj) {
+    subj = { name: bank.subject, icon: bank.icon || '📖', desc: bank.desc || '',
+             chapters: [], count: 0, ids: [] };
+    CARD_SUBJECTS.push(subj);
+  }
+  for (const ch of bank.chapters) {
+    const chap = { name: ch.name || '未分类', ids: [], count: 0 };
+    for (const raw of (ch.cards || [])) {
+      const title = String(raw.k || raw.title || '').trim();
+      const body = String(raw.a || raw.body || '').trim();
+      if (!title || !body) continue;
+      const id = (raw.id ? String(raw.id) : '') ||
+        hash(bank.subject + '|' + chap.name + '|' + title);
+      const card = {
+        id, subject: bank.subject, chapter: chap.name,
+        type: (CARD_TYPE_NAME[raw.t] ? raw.t : 'term'),
+        title, body,
+        tip: String(raw.tip || '').trim(),
+        freq: clamp(parseInt(raw.f, 10) || 1, 1, 3)
+      };
+      CARDS.push(card);
+      CARD_BY_ID.set(id, card);
+      chap.ids.push(id);
+      subj.ids.push(id);
+    }
+    chap.count = chap.ids.length;
+    subj.count += chap.count;
+    if (chap.count) subj.chapters.push(chap);
+  }
+}
+
+/* ---------------- 掌握度与复习排程 ---------------- */
+
+function cardRec(id) {
+  let r = RECITE[id];
+  if (!r) r = RECITE[id] = { box: 0, due: 0, seen: 0, state: '', ts: 0 };
+  return r;
+}
+function cardState(id) {          // new | no | vague | ok
+  const r = RECITE[id];
+  if (!r || !r.seen) return 'new';
+  return r.state || 'ok';
+}
+function dayStart(offset) {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  if (offset) d.setDate(d.getDate() + offset);
+  return d.getTime();
+}
+/** 给卡片打分：0 没记住 / 1 有点模糊 / 2 记住了 */
+function cardGrade(id, g) {
+  const r = cardRec(id);
+  r.seen++;
+  r.ts = Date.now();
+  if (g === 2) { r.box = Math.min(r.box + 1, SRS_DAYS.length - 1); r.state = 'ok'; }
+  else if (g === 1) { r.box = Math.min(Math.max(r.box, 1), 2); r.state = 'vague'; }
+  else { r.box = 0; r.state = 'no'; }
+  r.due = dayStart(g === 2 ? SRS_DAYS[r.box] : (g === 1 ? 1 : 0));
+  LS.set(K.recite, RECITE);
+}
+
+function cardStats(ids) {
+  let learned = 0, solid = 0, weak = 0;
+  for (const id of ids) {
+    const s = cardState(id);
+    if (s !== 'new') learned++;
+    if (s === 'ok') solid++;
+    if (s === 'no' || s === 'vague') weak++;
+  }
+  return { total: ids.length, learned, solid, weak, fresh: ids.length - learned };
+}
+function dueCardIds(ids) {
+  const t0 = dayStart();
+  return ids.filter(id => {
+    const r = RECITE[id];
+    return r && r.seen > 0 && r.due <= t0;
+  });
+}
+function newCardIds(ids) {
+  return ids.filter(id => cardState(id) === 'new');
+}
+function weakCardIds(ids) {
+  return ids.filter(id => cardState(id) === 'no' || cardState(id) === 'vague');
+}
+function allCardIds() { return CARDS.map(c => c.id); }
+
+/** 今日队列：先复习到期的，再用新卡补足每日额度 */
+function todayQueue() {
+  const all = allCardIds();
+  const due = shuffle(dueCardIds(all));
+  const n = Math.max(5, SET.cardDaily);
+  const picked = due.slice(0, n);
+  if (picked.length < n) {
+    picked.push(...shuffle(newCardIds(all)).slice(0, n - picked.length));
+  }
+  return picked;
+}
+
+/* ---------------- 背诵会话 ---------------- */
+
+let RC = null;
+
+function startRecite(ids, title, opts) {
+  const list = ids.filter(id => CARD_BY_ID.has(id));
+  if (!list.length) { toast('这里还没有卡片'); return; }
+  RC = {
+    ids: (opts && opts.shuffle) ? shuffle(list) : list,
+    idx: 0, flip: false, title: title || '背诵',
+    title0: title || '背诵',
+    right: 0, vague: 0, wrong: 0,
+    finished: false,
+    startedAt: Date.now()
+  };
+  go({ name: 'reciteCards', title: RC.title });
+}
+
+/* ---------------- 背诵首页 ---------------- */
+
+VIEWS.recite = function () {
+  if (!CARDS.length) {
+    return h('div', { class: 'empty' },
+      h('div', { class: 'ic' }, '📖'),
+      h('b', null, '还没有背诵内容'),
+      h('p', null, '把 data/ 里的背诵卡片文件放好就能看到了。'));
+  }
+  const all = allCardIds();
+  const st = cardStats(all);
+  const due = dueCardIds(all).length;
+  const q = todayQueue();
+
+  const node = h('div', null,
+    h('div', { class: 'hero rc-hero' },
+      h('h1', null, '今天要背的'),
+      h('p', null, due
+        ? '有 ' + due + ' 张到期的卡在等你复习'
+        : (st.fresh ? '先开新卡吧，共 ' + st.fresh + ' 张没背过' : '所有卡片都排上了，保持住')),
+      h('div', { class: 'hero-stats' },
+        h('div', null, h('b', null, q.length), h('span', null, '今日队列')),
+        h('div', null, h('b', null, st.solid), h('span', null, '已掌握')),
+        h('div', null, h('b', null, st.weak), h('span', null, '待巩固'))
+      )
+    ),
+
+    h('div', { class: 'sec mt16' },
+      h('button', { class: 'btn primary big', onClick: () => startRecite(todayQueue(), '今日背诵') },
+        '开始今日背诵 · ' + q.length + ' 张'),
+      h('div', { class: 'row', style: { marginTop: '9px', gap: '9px' } },
+        h('button', { class: 'btn sm', style: { flex: '1' },
+          onClick: () => {
+            const w = weakCardIds(all);
+            if (!w.length) { toast('没有待巩固的卡片 👍'); return; }
+            startRecite(w, '待巩固', { shuffle: true });
+          } }, '只背没记住的 · ' + st.weak),
+        h('button', { class: 'btn sm', style: { flex: '1' },
+          onClick: () => go({ name: 'reciteList', filter: 'all' }) }, '考点速查')
+      )
+    ),
+
+    h('div', { class: 'sec' },
+      h('div', { class: 'sec-hd' }, h('h2', null, '按科目 / 章节背')),
+      ...CARD_SUBJECTS.map(reciteSubjCard)
+    ),
+
+    h('div', { class: 'sec' },
+      h('div', { class: 'sec-hd' }, h('h2', null, '专项')),
+      h('div', { class: 'grid' },
+        ...CARD_TYPE_ORDER.map(t => {
+          const ids = CARDS.filter(c => c.type === t).map(c => c.id);
+          if (!ids.length) return null;
+          return tile(cardTypeIcon(t), CARD_TYPE_NAME[t], ids.length + ' 张',
+            () => startRecite(ids, CARD_TYPE_NAME[t], { shuffle: true }));
+        })
+      )
+    ),
+
+    h('p', { class: 'tiny muted center', style: { marginTop: '16px', lineHeight: '1.9' } },
+      '共 ' + CARDS.length + ' 张考点卡片',
+      h('br'),
+      '记住的隔 1/2/4/7/15/30 天再出现，没记住的当天就回来')
+  );
+  return node;
+};
+
+function cardTypeIcon(t) {
+  return { term: '📘', short: '📝', essay: '🧩', table: '⚖️', exp: '🔬' }[t] || '📄';
+}
+
+function reciteSubjCard(subj) {
+  const st = cardStats(subj.ids);
+  const pctDone = pct(st.learned, subj.count);
+  return h('button', { class: 'subj', style: { marginBottom: '10px' },
+    onClick: () => go({ name: 'reciteChapters', subject: subj.name }) },
+    h('div', { class: 'subj-top' },
+      h('div', { class: 'subj-icon' }, subj.icon),
+      h('div', { class: 'grow' },
+        h('b', { class: 'ellipsis' }, subj.name),
+        h('div', { class: 'meta' }, subj.chapters.length + ' 章 · ' + subj.count + ' 张 · 已学 ' +
+          st.learned + ' 张')
+      ),
+      h('div', { class: 'subj-ring' },
+        h('em', null, pctDone + '%'),
+        h('span', null, '已过一遍')
+      )
+    ),
+    h('div', { class: 'bar' }, h('i', { style: { width: pctDone + '%' } }))
+  );
+}
+
+VIEWS.reciteChapters = function (route) {
+  const subj = CARD_SUBJECTS.find(s => s.name === route.subject) || CARD_SUBJECTS[0];
+  if (!subj) return h('div', { class: 'empty' }, '没有内容');
+  const st = cardStats(subj.ids);
+  return h('div', null,
+    h('div', { class: 'card', style: { padding: '15px', marginBottom: '14px' } },
+      h('div', { class: 'row' },
+        h('div', { class: 'subj-icon' }, subj.icon),
+        h('div', { class: 'grow' },
+          h('b', { style: { fontSize: '16.5px', fontWeight: '650' } }, subj.name),
+          h('div', { class: 'meta tiny muted' }, subj.desc || (subj.count + ' 张卡片'))
+        )
+      ),
+      h('div', { class: 'bar', style: { marginTop: '13px' } },
+        h('i', { style: { width: pct(st.learned, subj.count) + '%' } })),
+      h('div', { class: 'row tiny muted', style: { marginTop: '7px', justifyContent: 'space-between' } },
+        h('span', null, '已学 ' + st.learned + ' / ' + st.total),
+        h('span', null, '待巩固 ' + st.weak + ' 张')
+      )
+    ),
+    h('button', { class: 'btn primary big', style: { marginBottom: '14px' },
+      onClick: () => startRecite(subj.ids, subj.name + ' · 全部') },
+      '背完这一科 · ' + subj.count + ' 张'),
+    ...subj.chapters.map(ch => {
+      const cst = cardStats(ch.ids);
+      const cls = cst.learned === 0 ? '' : (cst.weak === 0 ? 'done' : 'mid');
+      return h('div', { class: 'list', style: { marginBottom: '9px' } },
+        h('button', { class: 'li', onClick: () => startRecite(ch.ids, ch.name) },
+          h('div', { class: 'chap-dot ' + cls }),
+          h('div', { class: 'grow' },
+            h('b', { class: 'ellipsis' }, ch.name),
+            h('span', null, ch.count + ' 张 · 已学 ' + cst.learned +
+              (cst.weak ? ' · 待巩固 ' + cst.weak : ''))
+          ),
+          h('div', { class: 'chev' }, '›')
+        )
+      );
+    })
+  );
+};
+
+/* ---------------- 卡片背诵界面 ---------------- */
+
+VIEWS.reciteCards = function () {
+  if (!RC || !RC.ids.length) return h('div', { class: 'empty' }, '没有卡片');
+  if (RC.finished) return reciteSummary();
+  const c = CARD_BY_ID.get(RC.ids[RC.idx]);
+  if (!c) return h('div', { class: 'empty' }, '卡片不存在');
+  const st = cardState(c.id);
+
+  return h('div', null,
+    h('div', { class: 'qprog' },
+      h('i', { style: { width: pct(RC.idx + 1, RC.ids.length) + '%' } })),
+    h('div', { class: 'q-head' },
+      h('span', { class: 'pill' }, CARD_TYPE_NAME[c.type]),
+      h('span', { class: 'pill gray', title: '考频' }, '★'.repeat(c.freq)),
+      h('span', { class: 'q-count', style: { marginLeft: 'auto' } },
+        (RC.idx + 1) + ' / ' + RC.ids.length)
+    ),
+
+    h('div', { class: 'rcard' + (RC.flip ? ' flipped' : ''), onClick: toggleFlip },
+      h('div', { class: 'rcard-ch ellipsis' },
+        c.chapter.replace(/^第(\d+)章\s*/, '第$1章 · ') || c.subject),
+      h('div', { class: 'rcard-title' }, c.title),
+      RC.flip
+        ? h('div', { class: 'rcard-body' },
+            h('div', { class: 'rcard-answer' }, c.body),
+            c.tip ? h('div', { class: 'rcard-tip' }, '💡 ' + c.tip) : null
+          )
+        : h('div', { class: 'rcard-hint' },
+            h('div', { class: 'rcard-hint-ic' }, '🧠'),
+            '先在心里默背一遍',
+            h('br'),
+            '想好了点这张卡看要点'
+          ),
+      st === 'no' || st === 'vague'
+        ? h('div', { class: 'rcard-state ' + st },
+            st === 'no' ? '上次：没记住' : '上次：有点模糊')
+        : null
+    ),
+
+    RC.flip ? reciteGradeBar(c) : h('div', { class: 'q-actions' },
+      RC.idx > 0 ? h('button', { class: 'btn ghost sm',
+        style: { flex: '0 0 auto', padding: '13px 15px' }, onClick: recitePrev }, '上一张') : null,
+      h('button', { class: 'btn primary', onClick: toggleFlip }, '看要点'),
+      h('button', { class: 'btn ghost sm',
+        style: { flex: '0 0 auto', padding: '13px 15px' }, onClick: reciteNext }, '跳过')
+    )
+  );
+};
+
+function reciteGradeBar(c) {
+  const grade = (g) => {
+    cardGrade(c.id, g);
+    haptic(g === 2 ? 10 : 18);
+    if (g === 2) RC.right++; else if (g === 1) RC.vague++; else RC.wrong++;
+    RC.flip = false;
+    reciteNext();
+  };
+  return h('div', { class: 'q-actions' },
+    h('button', { class: 'btn ghost sm',
+      style: { flex: '0 0 auto', padding: '13px 13px' }, onClick: recitePrev }, '‹'),
+    h('button', { class: 'btn rc-no', onClick: () => grade(0) }, '没记住'),
+    h('button', { class: 'btn rc-vague', onClick: () => grade(1) }, '有点模糊'),
+    h('button', { class: 'btn rc-ok', onClick: () => grade(2) }, '记住了')
+  );
+}
+
+function toggleFlip() {
+  RC.flip = !RC.flip;
+  rerenderRecite();
+}
+function recountRefresh() {
+  const v = $('#view');
+  v.textContent = '';
+  append(v, [VIEWS.reciteCards({ name: 'reciteCards' })]);
+  v.scrollTop = 0;
+}
+function rerenderRecite() { recountRefresh(); }
+function reciteNext() {
+  if (RC.idx >= RC.ids.length - 1) { RC.finished = true; recountRefresh(); return; }
+  RC.idx++;
+  recountRefresh();
+}
+function recitePrev() {
+  if (RC.idx <= 0) return;
+  RC.idx--;
+  RC.flip = false;
+  recountRefresh();
+}
+
+function reciteSummary() {
+  const total = RC.right + RC.vague + RC.wrong;
+  const rate = pct(RC.right, total);
+  return h('div', { class: 'result' },
+    h('div', { class: 'ring' },
+      h('svg', { viewBox: '0 0 132 132',
+        style: { position: 'absolute', inset: '0', width: '100%', height: '100%', transform: 'rotate(-90deg)' } },
+        h('circle', { cx: '66', cy: '66', r: '56',
+          style: { fill: 'none', stroke: 'var(--line)', strokeWidth: '10' } }),
+        h('circle', { cx: '66', cy: '66', r: '56',
+          style: { fill: 'none', stroke: 'var(--accent)', strokeWidth: '10',
+                   strokeLinecap: 'round',
+                   strokeDasharray: String(2 * Math.PI * 56),
+                   strokeDashoffset: String(2 * Math.PI * 56 * (1 - rate / 100)) } })
+      ),
+      h('div', { class: 'inner' }, h('b', null, total), h('span', null, '张卡片'))
+    ),
+    h('h2', null, rate >= 70 ? '这一轮记得不错 👏' : '别急，明天再滚一遍就熟了'),
+    h('p', { class: 'muted tiny' }, RC.title0 + ' · 用时 ' + fmtTime(Math.round((Date.now() - RC.startedAt) / 1000))),
+    h('div', { class: 'res-grid' },
+      h('div', null, h('b', { style: { color: 'var(--ok)' } }, RC.right), h('span', null, '记住了')),
+      h('div', null, h('b', { style: { color: 'var(--warn)' } }, RC.vague), h('span', null, '模糊')),
+      h('div', null, h('b', { style: { color: 'var(--bad)' } }, RC.wrong), h('span', null, '没记住'))
+    ),
+    h('div', { class: 'sec', style: { textAlign: 'left', marginTop: '20px' } },
+      h('div', { class: 'list' },
+        RC.wrong + RC.vague > 0
+          ? liRow('🔁', '马上再过一遍没记住的', (RC.wrong + RC.vague) + ' 张',
+              () => startRecite(weakCardIds(RC.ids), '待巩固', { shuffle: true }))
+          : null,
+        liRow('📚', '这一科再滚一轮', RC.ids.length + ' 张',
+          () => startRecite(RC.ids, RC.title0, { shuffle: true })),
+        liRow('📖', '去考点速查', '像翻手册一样浏览', () => go({ name: 'reciteList', filter: 'all' }))
+      )
+    ),
+    h('button', { class: 'btn primary', style: { marginTop: '16px' },
+      onClick: () => { RC = null; reset({ name: 'recite' }); } }, '回到背诵首页')
+  );
+}
+
+/* ---------------- 考点速查（像翻手册） ---------------- */
+
+VIEWS.reciteList = function (route) {
+  const filter = route.filter || 'all';
+  const subjFilter = route.subject || 'all';
+
+  const chips = h('div', { class: 'chips' },
+    [['all', '全部'], ...CARD_TYPE_ORDER.map(t => [t, CARD_TYPE_NAME[t]])]
+      .map(([v, label]) => h('button', {
+        class: 'chip' + (filter === v ? ' on' : ''),
+        onClick: () => go({ name: 'reciteList', filter: v, subject: subjFilter })
+      }, label))
+  );
+
+  let list = CARDS;
+  if (filter !== 'all') list = list.filter(c => c.type === filter);
+  if (subjFilter !== 'all') list = list.filter(c => c.subject === subjFilter);
+
+  // 按科目 + 章节分组
+  const groups = [];
+  for (const c of list) {
+    const key = c.subject + ' / ' + c.chapter;
+    let g = groups[groups.length - 1];
+    if (!g || g.key !== key) { g = { key, subject: c.subject, chapter: c.chapter, items: [] }; groups.push(g); }
+    g.items.push(c);
+  }
+
+  return h('div', null,
+    chips,
+    h('p', { class: 'tiny muted', style: { margin: '10px 4px 14px' } },
+      '共 ' + list.length + ' 个考点 · 点标题展开要点'),
+    ...groups.map(g => h('div', { class: 'sec' },
+      h('div', { class: 'sec-hd' },
+        h('h2', { class: 'ellipsis' }, g.subject + ' · ' + g.chapter.replace(/^第(\d+)章\s*/, '第$1章 · ')),
+        h('span', { class: 'more' }, g.items.length + ' 个')
+      ),
+      h('div', { class: 'list' }, g.items.map(listRow))
+    ))
+  );
+};
+
+function listRow(c) {
+  const open = !!RECITE['open:' + c.id];
+  const st = cardState(c.id);
+  const dot = st === 'ok' ? 'done' : (st === 'new' ? '' : 'mid');
+  const chev = h('div', { class: 'chev' }, open ? '⌄' : '›');
+  const body = h('div', { class: 'rc-item-body' },
+    h('div', { class: 'rcard-answer' }, c.body),
+    c.tip ? h('div', { class: 'rcard-tip' }, '💡 ' + c.tip) : null
+  );
+  body.hidden = !open;
+  return h('div', { class: 'rc-item' },
+    h('button', { class: 'li', onClick: () => {
+        const now = !RECITE['open:' + c.id];
+        RECITE['open:' + c.id] = now;
+        body.hidden = !now;
+        chev.textContent = now ? '⌄' : '›';
+        LS.set(K.recite, RECITE);
+      } },
+      h('div', { class: 'chap-dot ' + dot }),
+      h('div', { class: 'grow' },
+        h('b', null, c.title),
+        h('span', null, CARD_TYPE_NAME[c.type] + ' · ' + '★'.repeat(c.freq))
+      ),
+      chev
+    ),
+    body
+  );
+}
+
+/* ==========================================================================
+   16. 交互：手势 / 键盘 / 事件绑定
    ========================================================================== */
 
 function bindSwipe() {
@@ -2026,6 +2535,8 @@ function init() {
   const banks = window.__BANKS || [];
   for (const b of banks) loadBank(b);
   loadCustom();
+
+  for (const b of (window.__RECITE || [])) loadReciteBank(b);
 
   if (!QUESTIONS.length) {
     $('#view').appendChild(h('div', { class: 'empty' },

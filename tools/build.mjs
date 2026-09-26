@@ -15,6 +15,8 @@ const css = read('styles.css');
 const appJs = read('app.js');
 const bankGeneral = read('data/bank-general.js');
 const bankExperimental = read('data/bank-experimental.js');
+const reciteGeneral = read('data/recite-general.js');
+const reciteExperimental = read('data/recite-experimental.js');
 const icon180 = readFileSync(resolve(ROOT, 'icons/icon-180.png')).toString('base64');
 const iconSvg = read('icons/icon.svg');
 
@@ -29,9 +31,13 @@ html = html.replace(/<link rel="icon"[^>]*>/,
 html = html.replace(/\s*<link rel="stylesheet" href="styles\.css">/, `\n<style>\n${css}\n</style>`);
 html = html.replace(/\s*<script src="data\/bank-general\.js"><\/script>/, '');
 html = html.replace(/\s*<script src="data\/bank-experimental\.js"><\/script>/, '');
+html = html.replace(/\s*<script src="data\/recite-general\.js"><\/script>/, '');
+html = html.replace(/\s*<script src="data\/recite-experimental\.js"><\/script>/, '');
 html = html.replace(/\s*<script src="app\.js"><\/script>/,
   `\n<script>\n/* ---------- 题库：普通心理学 ---------- */\n${bankGeneral}\n</script>` +
   `\n<script>\n/* ---------- 题库：实验心理学 ---------- */\n${bankExperimental}\n</script>` +
+  `\n<script>\n/* ---------- 背诵手册：普通心理学 ---------- */\n${reciteGeneral}\n</script>` +
+  `\n<script>\n/* ---------- 背诵手册：实验心理学 ---------- */\n${reciteExperimental}\n</script>` +
   `\n<script>\nwindow.__NO_SW = true;\n${appJs}\n</script>`);
 
 if (/src="|href="styles\.css/.test(html)) {
