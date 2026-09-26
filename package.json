@@ -1,0 +1,18 @@
+{
+  "name": "psych-quiz",
+  "version": "1.0.0",
+  "private": true,
+  "description": "心理学考研刷题（普通心理学 / 实验心理学）· 手机离线可用的单页应用",
+  "type": "module",
+  "scripts": {
+    "test": "node tools/validate.mjs && node tools/smoke-test.mjs",
+    "validate": "node tools/validate.mjs",
+    "smoke": "node tools/smoke-test.mjs",
+    "icons": "node tools/make-icons.mjs",
+    "build": "node tools/build.mjs",
+    "serve": "node tools/serve.mjs",
+    "start": "node tools/build.mjs && node tools/serve.mjs"
+  },
+  "keywords": ["心理学", "考研", "刷题", "普通心理学", "实验心理学"],
+  "license": "MIT"
+}

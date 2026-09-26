@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#6c5ce7">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="心理学刷题">
+<meta name="format-detection" content="telephone=no">
+<title>心理学刷题 · 普通心理学 / 实验心理学</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ============ 顶栏 ============ -->
+  <header class="topbar" id="topbar">
+    <button class="tb-btn" id="tbBack" hidden aria-label="返回">‹</button>
+    <h1 class="tb-title" id="tbTitle">心理学刷题</h1>
+    <button class="tb-btn" id="tbMore" aria-label="更多">⋯</button>
+  </header>
+
+  <!-- ============ 主内容 ============ -->
+  <main id="view" class="view"></main>
+
+  <!-- ============ 底部导航 ============ -->
+  <nav class="tabbar" id="tabbar">
+    <button class="tab is-on" data-tab="home">
+      <svg viewBox="0 0 24 24"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H10v16H5.5A1.5 1.5 0 0 1 4 18.5v-13Zm10-1.5h4.5A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5H14V4Z"/></svg>
+      <span>刷题</span>
+    </button>
+    <button class="tab" data-tab="wrong">
+      <svg viewBox="0 0 24 24"><path d="M12 3.2 2.6 19.4a1 1 0 0 0 .87 1.5h17.06a1 1 0 0 0 .87-1.5L12 3.2Zm0 5.3v5.2m0 2.6v.1"/></svg>
+      <span>错题本</span>
+    </button>
+    <button class="tab" data-tab="stats">
+      <svg viewBox="0 0 24 24"><path d="M4 20h16M7 20V11m5 9V5m5 15v-6"/></svg>
+      <span>统计</span>
+    </button>
+    <button class="tab" data-tab="me">
+      <svg viewBox="0 0 24 24"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0 2c-4 0-7 2.2-7 5v1h14v-1c0-2.8-3-5-7-5Z"/></svg>
+      <span>我的</span>
+    </button>
+  </nav>
+
+</div>
+
+<!-- ============ 全局弹层 ============ -->
+<div class="sheet-mask" id="sheetMask" hidden>
+  <section class="sheet" id="sheet" role="dialog" aria-modal="true">
+    <div class="sheet-hd">
+      <h2 id="sheetTitle">标题</h2>
+      <button class="tb-btn" id="sheetClose" aria-label="关闭">✕</button>
+    </div>
+    <div class="sheet-bd" id="sheetBody"></div>
+  </section>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="data/bank-general.js"></script>
+<script src="data/bank-experimental.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
