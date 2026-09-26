@@ -51,4 +51,5 @@ for (const f of ['index.html', 'styles.css', 'app.js', 'manifest.webmanifest', '
 for (const d of ['data', 'icons']) {
   cpSync(resolve(ROOT, d), resolve(SITE, d), { recursive: true });
 }
+writeFileSync(resolve(SITE, '.nojekyll'), '');   // 让 GitHub Pages 原样发布，不做 Jekyll 处理
 console.log('✓ 站点目录：' + SITE);

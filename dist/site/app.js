@@ -469,7 +469,7 @@ VIEWS.home = function () {
     /* 顶部卡片 */
     h('div', { class: 'hero' },
       h('h1', null, '今天也要加油呀'),
-      h('p', null, '普通心理学 · 实验心理学　目标：广外心理学硕士'),
+      h('p', null, '普通心理学 · 实验心理学'),
       h('div', { class: 'hero-stats' },
         h('div', null, h('b', null, today), h('span', null, '今日刷题')),
         h('div', null, h('b', null, streak), h('span', null, '连续打卡')),

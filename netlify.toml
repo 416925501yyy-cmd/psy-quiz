@@ -1,0 +1,9 @@
+# Netlify 部署配置：把仓库连到 Netlify 即可自动构建发布
+[build]
+  command = "node tools/build.mjs"
+  publish = "dist/site"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Cache-Control = "no-cache"

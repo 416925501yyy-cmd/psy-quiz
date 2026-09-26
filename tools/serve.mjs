@@ -27,11 +27,17 @@ const server = createServer(async (req, res) => {
     if (p === '/' || p === '') p = '/index.html';
     const file = normalize(join(ROOT, p));
     if (!file.startsWith(ROOT)) { res.writeHead(403).end('403'); return; }
-    const s = await stat(file).catch(() => null);
+    let s = await stat(file).catch(() => null);
+    let target = file;
+    // 目录地址自动补 index.html，跟 GitHub Pages 的行为保持一致
+    if (s && s.isDirectory()) {
+      target = join(file, 'index.html');
+      s = await stat(target).catch(() => null);
+    }
     if (!s || !s.isFile()) { res.writeHead(404).end('404 Not Found'); return; }
-    const body = await readFile(file);
+    const body = await readFile(target);
     res.writeHead(200, {
-      'Content-Type': MIME[extname(file).toLowerCase()] || 'application/octet-stream',
+      'Content-Type': MIME[extname(target).toLowerCase()] || 'application/octet-stream',
       'Cache-Control': 'no-cache'
     });
     res.end(body);
