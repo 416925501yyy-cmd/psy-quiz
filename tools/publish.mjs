@@ -26,7 +26,7 @@ const getArg = (name, dft) => {
   const hit = args.find((a) => a.startsWith('--' + name + '='));
   return hit ? hit.split('=').slice(1).join('=') : dft;
 };
-const REPO = getArg('repo', 'psych-quiz');
+const REPO = getArg('repo', 'psy-quiz');
 const DRY = args.includes('--dry-run');
 
 /* ---------------- 小工具 ---------------- */
@@ -131,30 +131,55 @@ if (!me.ok) {
 const login = me.data.login;
 console.log('\n✓ 已登录：' + c.bold(login));
 
-/* 2. 建仓库（已存在就跳过） */
-const created = await api('/user/repos', {
-  method: 'POST',
-  body: {
-    name: REPO,
-    description: '心理学考研刷题（普通心理学 / 实验心理学）· 手机离线可用',
-    private: false,
-    auto_init: true,
-    has_issues: false,
-    has_wiki: false
-  }
-});
-if (created.ok) {
-  console.log('✓ 已创建仓库：' + login + '/' + REPO + c.dim('（公开）'));
-  await new Promise((r) => setTimeout(r, 1500));   // 等 auto_init 建出 main 分支
-} else if (created.status === 422) {
+/* 2. 确认仓库；不存在才尝试创建 */
+const repoPath = '/repos/' + login + '/' + REPO;
+let exists = (await api(repoPath)).ok;
+
+if (exists) {
   console.log('· 仓库已存在，直接更新内容：' + login + '/' + REPO);
 } else {
-  die('创建仓库失败（HTTP ' + created.status + '）' +
-    (created.data && created.data.message ? '：' + created.data.message : ''));
+  const created = await api('/user/repos', {
+    method: 'POST',
+    body: {
+      name: REPO,
+      description: '心理学考研刷题（普通心理学 / 实验心理学）· 手机离线可用',
+      private: false,
+      auto_init: true,
+      has_issues: false,
+      has_wiki: false
+    }
+  });
+  if (created.ok) {
+    console.log('✓ 已创建仓库：' + login + '/' + REPO + c.dim('（公开）'));
+    await new Promise((r) => setTimeout(r, 2000));   // 等 auto_init 建出 main 分支
+    exists = true;
+  } else if (created.status === 422) {
+    console.log('· 仓库已存在，直接更新内容：' + login + '/' + REPO);
+    exists = true;
+  } else if (created.status === 403) {
+    /* 细粒度令牌 GitHub 不允许建仓库，再确认一次是否真的不存在 */
+    exists = (await api(repoPath)).ok;
+    if (!exists) {
+      die('创建仓库失败：你的令牌是「细粒度令牌」，GitHub 不允许它创建仓库。\n' +
+        '  两个办法，二选一：\n' +
+        '  1）先在网页上建一个同名空仓库（New repository → 名字 ' + REPO +
+        ' → 选 Public → Create），然后重跑这个脚本；\n' +
+        '  2）或改用经典令牌：Developer settings → Personal access tokens → Tokens (classic) → ' +
+        'Generate new token (classic) → 勾选 repo → 生成。');
+    }
+  } else {
+    die('创建仓库失败（HTTP ' + created.status + '）' +
+      (created.data && created.data.message ? '：' + created.data.message : ''));
+  }
 }
 
+/* 确认默认分支，避免往不存在的分支写 */
+const repoInfo = await api(repoPath);
+const BRANCH = (repoInfo.ok && repoInfo.data.default_branch) || 'main';
+if (BRANCH !== 'main') console.log(c.dim('· 仓库默认分支是 ' + BRANCH + '，按它来'));
+
 /* 3. 逐个上传（Contents API，二进制安全） */
-let okCount = 0, failCount = 0;
+let okCount = 0, failCount = 0, permDenied = false;
 for (const f of files) {
   const buf = await readFile(f.full);
   const encoded = buf.length ? buf.toString('base64') : Buffer.from('\n').toString('base64');
@@ -162,29 +187,38 @@ for (const f of files) {
     f.path.split('/').map(encodeURIComponent).join('/');
 
   let sha;
-  const head = await api(apiPath + '?ref=main');
+  const head = await api(apiPath + '?ref=' + BRANCH);
   if (head.ok && head.data && head.data.sha) sha = head.data.sha;
 
   const put = await api(apiPath, {
     method: 'PUT',
-    body: { message: '更新 ' + f.path, content: encoded, branch: 'main', ...(sha ? { sha } : {}) }
+    body: { message: '更新 ' + f.path, content: encoded, branch: BRANCH, ...(sha ? { sha } : {}) }
   });
   if (put.ok) { okCount++; console.log('  ✓ ' + f.path); }
   else {
     failCount++;
     console.log('  ' + c.red('✗ ' + f.path) + c.dim('  HTTP ' + put.status +
       (put.data && put.data.message ? '：' + put.data.message : '')));
+    // 第一个文件就被拒绝，基本都是令牌没给写权限，不用再白试剩下 11 个
+    if (put.status === 403 && okCount === 0) { permDenied = true; break; }
   }
+}
+if (permDenied) {
+  die('令牌没有写入权限，一个文件都没传上去。\n' +
+    '  如果你用的是细粒度令牌（github_pat_…），请去这个页面改权限：\n' +
+    '  https://github.com/settings/personal-access-tokens → 点开你的令牌 → Permissions →\n' +
+    '  Repository permissions 里把 Contents 和 Pages 都改成 Read and write → 拉到最底 Save。\n' +
+    '  也可以改用经典令牌：Tokens (classic) → Generate new token (classic) → 勾 repo。');
 }
 if (failCount) console.log(c.dim('\n（失败的可以重跑一次，脚本会覆盖已有文件）'));
 
 /* 4. 开启 Pages */
-const pagesBody = { source: { branch: 'main', path: '/' } };
+const pagesBody = { source: { branch: BRANCH, path: '/' } };
 let pages = await api('/repos/' + login + '/' + REPO + '/pages', { method: 'POST', body: pagesBody });
 if (!pages.ok && (pages.status === 409 || pages.status === 422)) {
   pages = await api('/repos/' + login + '/' + REPO + '/pages', { method: 'PUT', body: pagesBody });
 }
-if (pages.ok) console.log('✓ 已开启 GitHub Pages（从 main 分支发布）');
+if (pages.ok) console.log('✓ 已开启 GitHub Pages（从 ' + BRANCH + ' 分支发布）');
 else console.log('· 未能自动开启 Pages（HTTP ' + pages.status + '）' +
   c.dim('，可手动：仓库 → Settings → Pages → Source 选 main / (root)'));
 
