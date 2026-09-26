@@ -1,0 +1,23 @@
+# 每次推送自动跑题库自检和功能冒烟测试
+# 注意：网站是通过 GitHub Pages 的「Deploy from a branch → main /(root)」发布的，
+# 仓库根目录本身就是可发布的站点，所以这里不再做部署，只做质量检查。
+name: 自检
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: 题库与卡片自检
+        run: node tools/validate.mjs
+      - name: 功能冒烟测试
+        run: node tools/smoke-test.mjs
