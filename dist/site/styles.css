@@ -431,6 +431,15 @@ html[data-theme="dark"] .rcard{border-color:var(--line)}
 .rc-item + .rc-item{border-top:1px solid var(--line)}
 .rc-item-body{padding:0 15px 15px;animation:fadeUp .2s ease}
 
+.undo-bar{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  width:100%;margin-top:12px;padding:11px 14px;border-radius:13px;
+  background:var(--card);border:1px solid var(--line);
+  font-size:13.5px;color:var(--sub);text-align:left;
+}
+.undo-bar b{color:var(--accent);font-weight:650;flex:0 0 auto}
+.undo-bar:active{background:var(--card2)}
+
 .result{text-align:center;padding:26px 18px}
 .result .ring{
   width:132px;height:132px;margin:0 auto 16px;border-radius:50%;

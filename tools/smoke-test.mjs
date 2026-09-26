@@ -442,17 +442,38 @@ const recId = Object.keys(rec).find(k => !k.startsWith('open:'));
 ok(recId && rec[recId].box === 1, '「记住了」使档位升到 1（' + (recId ? rec[recId].box : '?') + '）');
 ok(recId && rec[recId].due > Date.now(), '下次复习时间排到了未来');
 
-// 结束本轮，看小结
+// —— 打分撤销 ——
+const undoEl = view.querySelector('.undo-bar');
+ok(!!undoEl, '打分后出现「撤销」条');
+ok(undoEl.textContent.includes('记住了'), '撤销条写明上一张标的是什么');
+undoEl.click();
+ok(view.querySelector('.rcard').classList.contains('flipped'), '撤销后回到那张卡并保持翻面');
+ok(view.querySelector('.q-count').textContent.trim().startsWith('1 /'), '撤销后回到原来那张卡');
+ok(!view.querySelector('.undo-bar'), '撤销后撤销条消失');
+const recAfterUndo = JSON.parse(env.win.localStorage.getItem('psy.recite.v1') || '{}');
+ok(Object.keys(recAfterUndo).filter((k) => !k.startsWith('open:')).length === 0,
+  '撤销后这条掌握度记录被清掉');
+
+// —— 继续背几张 ——
 let guard2 = 0;
-while (!/张卡片/.test(view.textContent) && guard2++ < 40) {
-  if (view.querySelector('.rcard') && !view.querySelector('.rcard').classList.contains('flipped')) {
-    view.querySelector('.rcard').click();
-  }
-  const btn = findByText(view, '记住了', 'button') || findByText(view, '跳过', 'button');
-  if (btn) btn.click(); else break;
+while (guard2++ < 3) {
+  const card = view.querySelector('.rcard');
+  if (!card.classList.contains('flipped')) card.click();
+  clickByText(view, '记住了');
 }
-ok(guard2 < 40, '能一路背到本轮结束');
+const recAfter3 = JSON.parse(env.win.localStorage.getItem('psy.recite.v1') || '{}');
+ok(Object.keys(recAfter3).filter((k) => !k.startsWith('open:')).length === 3, '连续背 3 张都写入了记录');
+
+// —— 中途结算 ——
+ok(D.querySelector('#tbMore').hidden === false, '背诵中途显示 ⋯ 菜单按钮');
+D.querySelector('#tbMore').click();
+ok(D.querySelector('#sheetMask').hidden === false, '能打开本轮设置菜单');
+ok(!!findByText(D.querySelector('#sheetBody'), '结束本轮，看小结', 'button'), '菜单里有「结束本轮，看小结」');
+clickByText(D.querySelector('#sheetBody'), '结束本轮，看小结');
+ok(/张卡片/.test(view.textContent), '中途结算进入小结页');
 ok(/记住了[\s\S]*模糊[\s\S]*没记住/.test(view.textContent), '小结显示三档统计');
+ok(D.querySelector('#tbMore').hidden === true, '小结页收起 ⋯ 按钮');
+ok(!!view.querySelector('.undo-bar'), '小结页也能撤销最后一笔');
 
 // 考点速查
 clickByText(view, '回到背诵首页');

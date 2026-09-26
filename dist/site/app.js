@@ -444,7 +444,8 @@ function render(route) {
   }
   $('#tbTitle').textContent = route.title || TITLES[route.name] || '心理学刷题';
   $('#tbBack').hidden = !(nav.length > 0 && !showTab);
-  $('#tbMore').hidden = route.name !== 'practice';
+  $('#tbMore').hidden = !(route.name === 'practice' ||
+    (route.name === 'reciteCards' && RC && !RC.finished));
 
   v.textContent = '';
   const view = VIEWS[route.name];
@@ -1547,6 +1548,42 @@ function openPracticeSheet() {
   ]);
 }
 
+/** 背诵中途的本轮菜单 */
+function openReciteSheet() {
+  if (!RC || RC.finished) return;
+  const left = RC.ids.length - RC.idx - 1;
+  const graded = RC.right + RC.vague + RC.wrong;
+  openSheet('本轮设置', [
+    h('p', { class: 'muted tiny', style: { marginBottom: '14px' } },
+      RC.title0 + ' · 还剩 ' + left + ' 张 · 已评 ' + graded + ' 张'),
+    h('div', { class: 'list', style: { boxShadow: 'none', border: '1px solid var(--line)' } },
+      liRow('🏁', '结束本轮，看小结', '不想背完就能先结算', () => {
+        closeSheet(); RC.finished = true; recountRefresh();
+      }),
+      liRow('🎯', '只背这轮里没记住的', '把队列换成待巩固的卡', () => {
+        const weak = weakCardIds(RC.ids);
+        if (!weak.length) { toast('这轮都记住了 👍'); return; }
+        closeSheet();
+        startRecite(weak, '待巩固', { shuffle: true });
+      }),
+      liRow('🎲', '打乱剩下没背的', '已评过的顺序不动', () => {
+        const head = RC.ids.slice(0, RC.idx + 1);
+        const tail = shuffle(RC.ids.slice(RC.idx + 1));
+        RC.ids = head.concat(tail);
+        RC.last = null;
+        closeSheet(); recountRefresh(); toast('已打乱剩余卡片');
+      }),
+      liRow('📖', '去考点速查', '像翻手册一样浏览', () => {
+        closeSheet(); go({ name: 'reciteList', filter: 'all' });
+      }),
+      liRow('🚪', '先退出（进度已保存）', '回背诵首页', () => {
+        closeSheet(); RC = null; reset({ name: 'recite' });
+        toast('已评过的卡片都保存了');
+      })
+    )
+  ]);
+}
+
 /** 题目导航（答题卡）：一屏看到这一套题的全部题号，点哪去哪 */
 function openNavigatorSheet() {
   if (!S || !S.ids.length) return;
@@ -1990,6 +2027,8 @@ function openHelpSheet() {
       '然后按「没记住 / 有点模糊 / 记住了」给自己打分。',
       '记住的卡片会按 1、2、4、7、15、30 天自动排进「今日背诵」里再出现，',
       '没记住的当天就回来。只想突击没背熟的，就点「只背没记住的」。',
+      '万一点错了评价，卡片下面有一条「↩ 撤销」，点一下就回到那张卡重新打分。',
+      '背到一半想停下来，点右上角 ⋯ →「结束本轮，看小结」。',
       '想当手册翻，用「考点速查」，点标题就能展开要点。',
       h('span', { class: 'lbl', style: { marginTop: '12px' } }, '四、怎么放到手机上'),
       '把这个文件夹用微信 / 邮件传到手机，用浏览器打开 index.html 即可；',
@@ -2077,6 +2116,7 @@ function dayStart(offset) {
 }
 /** 给卡片打分：0 没记住 / 1 有点模糊 / 2 记住了 */
 function cardGrade(id, g) {
+  const before = RECITE[id] ? JSON.parse(JSON.stringify(RECITE[id])) : null;
   const r = cardRec(id);
   r.seen++;
   r.ts = Date.now();
@@ -2085,6 +2125,7 @@ function cardGrade(id, g) {
   else { r.box = 0; r.state = 'no'; }
   r.due = dayStart(g === 2 ? SRS_DAYS[r.box] : (g === 1 ? 1 : 0));
   LS.set(K.recite, RECITE);
+  return before;          // 交给撤销用
 }
 
 function cardStats(ids) {
@@ -2136,6 +2177,7 @@ function startRecite(ids, title, opts) {
     idx: 0, flip: false, title: title || '背诵',
     title0: title || '背诵',
     right: 0, vague: 0, wrong: 0,
+    last: null,             // 上一次打分，用于撤销
     finished: false,
     startedAt: Date.now()
   };
@@ -2315,6 +2357,8 @@ VIEWS.reciteCards = function () {
         : null
     ),
 
+    undoBar(),
+
     RC.flip ? reciteGradeBar(c) : h('div', { class: 'q-actions' },
       RC.idx > 0 ? h('button', { class: 'btn ghost sm',
         style: { flex: '0 0 auto', padding: '13px 15px' }, onClick: recitePrev }, '上一张') : null,
@@ -2325,11 +2369,39 @@ VIEWS.reciteCards = function () {
   );
 };
 
+/** 上一张打错了？给一条撤销带，点一下就回到那张卡重新评价 */
+function undoBar() {
+  if (!RC || !RC.last) return null;
+  const g = RC.last.grade;
+  const label = g === 2 ? '记住了' : (g === 1 ? '有点模糊' : '没记住');
+  return h('button', { class: 'undo-bar', onClick: reciteUndo },
+    h('span', { class: 'ellipsis' }, '上一张标了「' + label + '」'),
+    h('b', null, '↩ 撤销')
+  );
+}
+
+function reciteUndo() {
+  if (!RC || !RC.last) return;
+  const { id, grade, prev } = RC.last;
+  if (prev) RECITE[id] = prev; else delete RECITE[id];
+  LS.set(K.recite, RECITE);
+  if (grade === 2) RC.right = Math.max(0, RC.right - 1);
+  else if (grade === 1) RC.vague = Math.max(0, RC.vague - 1);
+  else RC.wrong = Math.max(0, RC.wrong - 1);
+  RC.finished = false;
+  RC.idx = RC.last.idx;
+  RC.flip = true;           // 回到那张卡并保持翻面，方便重新打分
+  RC.last = null;
+  haptic(10);
+  recountRefresh();
+}
+
 function reciteGradeBar(c) {
   const grade = (g) => {
-    cardGrade(c.id, g);
+    const prev = cardGrade(c.id, g);
     haptic(g === 2 ? 10 : 18);
     if (g === 2) RC.right++; else if (g === 1) RC.vague++; else RC.wrong++;
+    RC.last = { id: c.id, grade: g, prev, idx: RC.idx };
     RC.flip = false;
     reciteNext();
   };
@@ -2351,6 +2423,8 @@ function recountRefresh() {
   v.textContent = '';
   append(v, [VIEWS.reciteCards({ name: 'reciteCards' })]);
   v.scrollTop = 0;
+  // 本轮已结束时就没必要再显示 ⋯ 菜单了
+  $('#tbMore').hidden = !(RC && !RC.finished);
 }
 function rerenderRecite() { recountRefresh(); }
 function reciteNext() {
@@ -2389,6 +2463,7 @@ function reciteSummary() {
       h('div', null, h('b', { style: { color: 'var(--warn)' } }, RC.vague), h('span', null, '模糊')),
       h('div', null, h('b', { style: { color: 'var(--bad)' } }, RC.wrong), h('span', null, '没记住'))
     ),
+    undoBar(),
     h('div', { class: 'sec', style: { textAlign: 'left', marginTop: '20px' } },
       h('div', { class: 'list' },
         RC.wrong + RC.vague > 0
@@ -2549,7 +2624,7 @@ function init() {
   $('#tbBack').addEventListener('click', back);
   $('#tbMore').addEventListener('click', () => {
     if (current && current.name === 'practice') openPracticeSheet();
-    else if (current && current.name === 'result') openPracticeSheet();
+    else if (current && current.name === 'reciteCards') openReciteSheet();
   });
   $('#sheetClose').addEventListener('click', closeSheet);
   $('#sheetMask').addEventListener('click', (e) => {
@@ -2571,6 +2646,15 @@ function init() {
 
   // 离线缓存（仅在通过网址访问、且不是单文件版时生效）
   if (!window.__NO_SW && 'serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
+    const hadController = !!navigator.serviceWorker.controller;
+    let reloading = false;
+    // 检测到新版本接管（sw.js 里的 VERSION 变了）时自动刷新一次，
+    // 否则离线缓存会让人一直看到旧版本
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController || reloading) return;
+      reloading = true;
+      location.reload();
+    });
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
 }
