@@ -321,6 +321,43 @@ if (reached === '多选') {
   ok(view.textContent.includes('答对了') || view.textContent.includes('答错了'), '多选判定结果显示正常');
 }
 
+console.log('\n【4.5】题目导航（答题卡）');
+const countBtn = view.querySelector('.q-count');
+ok(!!countBtn, '答题页右上角题号可点击');
+countBtn.click();
+const navBody = D.querySelector('#sheetBody');
+ok(D.querySelector('#sheetMask').hidden === false, '打开题目导航弹层');
+const nums = navBody.querySelectorAll('.qn');
+ok(nums.length === 20, '列出这一章全部 20 道题（实际 ' + nums.length + '）');
+ok(!!findByText(navBody, '回到第 1 题', 'button'), '有「回到第 1 题」按钮');
+ok(!!findByText(navBody, '跳到未做题', 'button'), '有「跳到未做题」按钮');
+ok(!!findByText(navBody, '最后一题', 'button'), '有「最后一题」按钮');
+nums[11].click();
+ok(view.textContent.includes('12 / 20'), '点第 12 格直接跳到第 12 题');
+ok(D.querySelector('#sheetMask').hidden === true, '跳转后弹层自动收起');
+view.querySelector('.q-count').click();
+clickByText(D.querySelector('#sheetBody'), '回到第 1 题');
+ok(view.textContent.includes('1 / 20'), '一键回到第 1 题');
+// 跨章节练习（每日一练）会出现章节分组
+D.querySelector('#tbMore').click();
+clickByText(D.querySelector('#sheetBody'), '先歇一会儿');
+clickByText(view, '每日一练');
+view.querySelector('.q-count').click();
+const dailyBody = D.querySelector('#sheetBody');
+ok(dailyBody.querySelectorAll('.qn').length === 15, '每日一练的导航列出 15 题');
+ok(dailyBody.querySelectorAll('.qgrid').length === 1, '所有题号放在同一个网格里（一屏看完）');
+ok(dailyBody.textContent.includes('每日一练'), '标题显示当前练习名称与所在章节');
+ok(/title/.test(Object.keys(dailyBody.querySelectorAll('.qn')[0]._attrs).join())
+  || dailyBody.querySelectorAll('.qn')[0].getAttribute('title') !== null,
+  '每个题号带章节/题干提示');
+clickByText(dailyBody, '回到第 1 题');
+// 回到「第3章 感觉」这一套，继续后面的测试
+D.querySelector('#tbMore').click();
+clickByText(D.querySelector('#sheetBody'), '先歇一会儿');
+view.querySelector('.subj').click();
+clickByText(view, '第3章 感觉');
+ok(view.textContent.includes('1 / 20'), '重新进入第3章，回到第 1 题');
+
 console.log('\n【5】主观题（名词解释）');
 guard = 0;
 while (guard++ < 80) {

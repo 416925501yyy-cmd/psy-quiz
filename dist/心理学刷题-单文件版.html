@@ -274,6 +274,36 @@ html[data-theme="dark"] .pill.gray{background:#262938}
 .pill.ok{background:var(--ok-soft);color:var(--ok)}
 .pill.bad{background:var(--bad-soft);color:var(--bad)}
 .q-count{margin-left:auto;font-size:13px;color:var(--sub);font-variant-numeric:tabular-nums}
+.q-count{padding:5px 9px;border-radius:9px;display:flex;align-items:center;gap:4px}
+.q-count:active{background:var(--card2)}
+
+/* 题目导航（答题卡） */
+.qgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(44px,1fr));gap:8px}
+.qn{
+  position:relative;aspect-ratio:1;border-radius:11px;
+  display:grid;place-items:center;
+  font-size:14px;font-weight:600;font-variant-numeric:tabular-nums;
+  background:var(--card);color:var(--sub);
+  border:1.5px solid var(--line);
+  transition:transform .12s;
+}
+.qn:active{transform:scale(.93)}
+.qn.done{background:var(--accent-soft);color:var(--accent);border-color:transparent}
+.qn.ok{background:var(--ok-soft);color:var(--ok);border-color:transparent}
+.qn.bad{background:var(--bad-soft);color:var(--bad);border-color:transparent}
+.qn.cur{border-color:var(--accent);color:var(--accent);
+  box-shadow:0 0 0 3px var(--accent-soft);font-weight:750}
+.qn.faved::after{
+  content:"";position:absolute;top:-2px;right:-2px;width:9px;height:9px;
+  border-radius:50%;background:var(--warn);border:1.5px solid var(--bg2);
+}
+.qlegend{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--sub);margin-top:14px}
+.qlegend span{display:flex;align-items:center;gap:5px}
+.qlegend i{width:12px;height:12px;border-radius:4px;display:block;
+  background:var(--card);border:1.5px solid var(--line)}
+.qlegend i.b{background:var(--accent-soft);border-color:transparent}
+.qlegend i.g{background:var(--ok-soft);border-color:transparent}
+.qlegend i.r{background:var(--bad-soft);border-color:transparent}
 
 .q-stem{
   background:var(--card);border-radius:var(--r);padding:16px 15px;
@@ -1978,10 +2008,19 @@ function qProgressBar() {
       h('span', { class: 'pill ellipsis', style: { maxWidth: '42vw' } },
         curQ().chapter.replace(/^第\d+章\s*/, '')),
       h('span', { class: 'pill ' + (TYPE_COLOR[curQ().type] || '') }, TYPE_NAME[curQ().type]),
-      h('span', { class: 'q-count' }, (S.idx + 1) + ' / ' + S.ids.length +
-        (answered ? ' · 已答' + answered : ''))
+      h('button', { class: 'q-count', onClick: openNavigatorSheet, title: '展开题目导航' },
+        (S.idx + 1) + ' / ' + S.ids.length + (answered ? ' · 已答' + answered : ''),
+        iconGrid())
     )
   );
+}
+
+/** 小宫格图标（题目导航） */
+function iconGrid() {
+  const sq = (x, y) => h('rect', { x: String(x), y: String(y), width: '7', height: '7', rx: '2' });
+  return h('svg', { viewBox: '0 0 24 24', width: '15', height: '15',
+    style: { fill: 'none', stroke: 'currentColor', strokeWidth: '2' } },
+    sq(3.5, 3.5), sq(13.5, 3.5), sq(3.5, 13.5), sq(13.5, 13.5));
 }
 
 function curQ() { return BY_ID.get(S.ids[S.idx]) || QUESTIONS[0]; }
@@ -2205,6 +2244,7 @@ function questionActions() {
         refreshActions();
       }
     }, fav ? '⭐' : '☆'),
+    h('button', { class: 'icon-btn', onClick: openNavigatorSheet, title: '题目导航' }, iconGrid()),
     S.idx > 0 ? h('button', { class: 'btn ghost sm', style: { flex: '0 0 auto', padding: '13px 15px' },
       onClick: prevQuestion }, '上一题') : null,
     needSubmit
@@ -2675,6 +2715,9 @@ function openPracticeSheet() {
     h('p', { class: 'muted tiny', style: { marginBottom: '14px' } },
       S.title + ' · ' + (S.idx + 1) + '/' + S.ids.length + ' 题 · 已答 ' + answered + ' 题'),
     h('div', { class: 'list', style: { boxShadow: 'none', border: '1px solid var(--line)' } },
+      liRow('▦', '题目导航（答题卡）', '一眼看到全部题号，点哪去哪', () => {
+        closeSheet(); openNavigatorSheet();
+      }),
       liRow('⏭', '跳到指定题号', '输入数字直接过去', () => {
         closeSheet();
         openSheet('跳到第几题', [
@@ -2710,6 +2753,73 @@ function openPracticeSheet() {
       })
     )
   ]);
+}
+
+/** 题目导航（答题卡）：一屏看到这一套题的全部题号，点哪去哪 */
+function openNavigatorSheet() {
+  if (!S || !S.ids.length) return;
+  const n = S.ids.length;
+  let right = 0, wrong = 0, answered = 0;
+  for (const id of S.ids) {
+    if (!S.judged[id]) continue;
+    answered++;
+    if (S.results[id] === true) right++;
+    else if (S.results[id] === false) wrong++;
+  }
+
+  const cells = S.ids.map((id, i) => {
+    const q = BY_ID.get(id) || {};
+    const cls = ['qn'];
+    if (S.judged[id]) cls.push(S.results[id] === true ? 'ok' : (S.results[id] === false ? 'bad' : 'done'));
+    if (i === S.idx) cls.push('cur');
+    if (FAV.indexOf(id) >= 0) cls.push('faved');
+    return h('button', {
+      class: cls.join(' '),
+      title: (i + 1) + '. ' + (q.chapter || '') + (q.stem ? '\n' + q.stem.slice(0, 40) : ''),
+      onClick: () => { closeSheet(); gotoQuestion(i); }
+    }, String(i + 1));
+  });
+  const curChapter = curQ().chapter || '';
+
+  openSheet('题目导航', [
+    h('p', { class: 'muted tiny', style: { marginBottom: '12px' } },
+      S.title + ' · 当前第 ' + (S.idx + 1) + ' 题' +
+      (curChapter && curChapter !== S.title
+        ? '（' + curChapter.replace(/^第(\d+)章\s*/, '第$1章 · ') + '）' : '')),
+    h('div', { class: 'row', style: { gap: '8px', flexWrap: 'wrap', marginBottom: '12px' } },
+      h('span', { class: 'pill gray' }, '共 ' + n + ' 题'),
+      h('span', { class: 'pill ok' }, '答对 ' + right),
+      h('span', { class: 'pill bad' }, '答错 ' + wrong),
+      h('span', { class: 'pill' }, '未答 ' + (n - answered))
+    ),
+    h('div', { class: 'row', style: { gap: '9px', marginBottom: '14px' } },
+      h('button', { class: 'btn sm', style: { flex: '1' },
+        onClick: () => { closeSheet(); gotoQuestion(0); } }, '回到第 1 题'),
+      h('button', { class: 'btn sm', style: { flex: '1' },
+        onClick: jumpToNextUnanswered }, '跳到未做题'),
+      h('button', { class: 'btn sm', style: { flex: '1' },
+        onClick: () => { closeSheet(); gotoQuestion(n - 1); } }, '最后一题')
+    ),
+    h('div', { class: 'qgrid' }, cells),
+    h('div', { class: 'qlegend' },
+      h('span', null, h('i', null), '未做'),
+      h('span', null, h('i', { class: 'b' }), '已选未判题'),
+      h('span', null, h('i', { class: 'g' }), '答对'),
+      h('span', null, h('i', { class: 'r' }), '答错'),
+      h('span', null, h('i', { class: 'b', style: { boxShadow: '0 0 0 2px var(--accent)' } }), '当前题'),
+      h('span', null, '右上角小圆点 = 已收藏')
+    )
+  ]);
+}
+
+/** 从当前题往后找第一道没答过的题 */
+function jumpToNextUnanswered() {
+  const n = S.ids.length;
+  for (let k = 1; k <= n; k++) {
+    const i = (S.idx + k) % n;
+    if (!S.judged[S.ids[i]]) { closeSheet(); gotoQuestion(i); return; }
+  }
+  toast('这一套题全部做过了 🎉');
 }
 
 const IMPORT_TEMPLATE = [
@@ -3076,6 +3186,8 @@ function openHelpSheet() {
       '名词解释和简答是「先默背、再看答案」，看完自己点「背下来了 / 还没记住」。',
       h('span', { class: 'lbl', style: { marginTop: '12px' } }, '二、快捷操作'),
       '左右滑动切换上一题 / 下一题；点 ☆ 收藏；右上角 ⋯ 有跳题号和保存退出。',
+      '点答题页右上角的题号（或右下角的宫格按钮）会展开「题目导航」，',
+      '一屏就能看到这一套题的全部题号，点任意数字直接跳过去，也可以一键回到第 1 题。',
       '电脑上还可以用 ← → 切题、数字键 1-8 选答案。',
       h('span', { class: 'lbl', style: { marginTop: '12px' } }, '三、怎么加题'),
       '「我的 → 导入题目」，把题目按示例格式粘贴进去即可，不用改代码。',

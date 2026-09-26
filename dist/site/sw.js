@@ -1,5 +1,8 @@
-/* 离线缓存：只在通过网址（http/https）访问时生效 */
-const CACHE = 'psy-quiz-v1';
+/* 离线缓存：只在通过网址（http/https）访问时生效
+   策略：网络优先 —— 有网时永远拿最新版本，没网时用缓存兜底。
+   这样以后更新题库或改功能，重新打开就是新的；改完记得把 VERSION 加 1。 */
+const VERSION = 2;
+const CACHE = 'psy-quiz-v' + VERSION;
 const ASSETS = [
   './',
   './index.html',
@@ -29,18 +32,17 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
+  const url = new URL(e.request.url);
+  if (url.origin !== location.origin) return;
   e.respondWith(
-    caches.match(e.request).then((hit) => {
-      const net = fetch(e.request)
-        .then((res) => {
-          if (res && res.status === 200 && res.type === 'basic') {
-            const copy = res.clone();
-            caches.open(CACHE).then((c) => c.put(e.request, copy));
-          }
-          return res;
-        })
-        .catch(() => hit || caches.match('./index.html'));
-      return hit || net;
-    })
+    fetch(e.request)
+      .then((res) => {
+        if (res && res.status === 200 && res.type === 'basic') {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(e.request, copy));
+        }
+        return res;
+      })
+      .catch(() => caches.match(e.request).then((hit) => hit || caches.match('./index.html')))
   );
 });
