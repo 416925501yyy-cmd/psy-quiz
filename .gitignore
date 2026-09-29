@@ -2,3 +2,9 @@ node_modules/
 .DS_Store
 Thumbs.db
 *.log
+
+# 用户提供的备考资料（第三方版权，不进公开仓库）
+*.pdf
+*.doc
+*.docx
+build/
