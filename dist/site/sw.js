@@ -1,7 +1,7 @@
 /* 离线缓存：只在通过网址（http/https）访问时生效
    策略：网络优先 —— 有网时永远拿最新版本，没网时用缓存兜底。
    这样以后更新题库或改功能，重新打开就是新的；改完记得把 VERSION 加 1。 */
-const VERSION = 5;
+const VERSION = 6;
 const CACHE = 'psy-quiz-v' + VERSION;
 const ASSETS = [
   './',
@@ -13,6 +13,8 @@ const ASSETS = [
   './data/m-term-2.js',
   './data/m-recall-1.js',
   './data/m-recall-2.js',
+  './data/m-short-1.js',
+  './data/m-short-2.js',
   './icons/icon.svg',
   './icons/icon-180.png',
   './icons/icon-512.png'

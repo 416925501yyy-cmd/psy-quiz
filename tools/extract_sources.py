@@ -172,13 +172,24 @@ def parse_exp_short():
     for k, mk in enumerate(marks):
         end = marks[k + 1].start() if k + 1 < len(marks) else len(t)
         seg = re.sub(r'\s*\n\s*', ' ', t[mk.end():end])
-        # 题干以问号/句号结束，后面是答案
-        m = re.match(r'^(.*?[？?])\s*(.+)$', seg, re.S)
-        if not m:
-            m = re.match(r'^(.*?。)\s*(.+)$', seg, re.S)
-        if not m:
+        # 题干可能占多行（材料题），答案从「1．」或「答：」那一行开始
+        lines = [l.strip() for l in t[mk.end():end].split('\n') if l.strip()]
+        if len(lines) < 2:
             continue
-        q, a = tidy(m.group(1)), tidy(m.group(2))
+        cut = None
+        for j, ln in enumerate(lines):
+            if j > 0 and re.match(r'^(?:答\s*[:：]|[（(]?1\s*[．.、)）])', ln):
+                cut = j
+                break
+        if cut is None:
+            cut = 1
+        q = tidy(' '.join(lines[:cut]))
+        a = tidy(' '.join(lines[cut:]).replace('答：', '', 1))
+        # 有些题干和答案开头挤在同一行（「自变量的类型。心理学实验……」），在这儿切开
+        if cut == 1 and '。' in q:
+            head, rest = q.split('。', 1)
+            if len(head) >= 4 and len(rest) >= 12:
+                q, a = head, tidy(rest + ' ' + a)
         if len(q) < 6 or len(a) < 20:
             continue
         items.append({'n': int(mk.group(1)), 'q': q, 'a': a})
