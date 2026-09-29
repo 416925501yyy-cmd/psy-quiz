@@ -366,6 +366,7 @@ VIEWS.cards = function (route) {
         (RC.idx + 1) + ' / ' + RC.ids.length, iconGrid())),
     h('div', { class: 'rcard' + (RC.flip ? ' flipped' : ''), onClick: flipRecall },
       h('div', { class: 'rcard-title' }, it.q),
+      it.src ? h('div', { class: 'rcard-src' }, '来源：' + it.src) : null,
       RC.flip
         ? h('div', { class: 'rcard-body' }, h('div', { class: 'ans' }, it.a))
         : h('div', { class: 'rcard-hint' },
