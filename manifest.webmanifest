@@ -1,7 +1,7 @@
 {
-  "name": "心理学刷题 · 普通心理学 / 实验心理学",
-  "short_name": "心理学刷题",
-  "description": "广东外语外贸大学心理学硕士备考刷题：普通心理学、实验心理学专项练习、错题本与学习统计",
+  "name": "心理学专业课背诵 · 广外应用心理 347",
+  "short_name": "专业课背诵",
+  "description": "广东外语外贸大学应用心理（347）专业课背诵：名词解释、简答、综合、快速回忆",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
@@ -16,3 +16,4 @@
     { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }
+
