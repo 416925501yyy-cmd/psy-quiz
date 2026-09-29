@@ -42,23 +42,35 @@ const die = (msg) => { console.error('\n' + c.red('✗ ' + msg)); process.exit(1
 function askHidden(question) {
   return new Promise((res) => {
     stdout.write(question);
+    let buffer = '';
     const onData = (chunk) => {
       const s = chunk.toString('utf8');
-      if (s.includes('\n') || s.includes('\r')) {
+      if (s.includes('\u0003')) {           // Ctrl+C
+        stdin.removeListener('data', onData);
+        stdin.pause();
+        process.exit(130);
+      }
+      // 粘贴时「令牌 + 回车」可能在同一块里到达，要先把回车之前的内容收下
+      const nl = s.search(/[\r\n]/);
+      if (nl >= 0) {
+        buffer += s.slice(0, nl);
         stdin.removeListener('data', onData);
         stdin.pause();
         stdout.write('\n');
         res(buffer.trim());
-      } else if (s === '\u0003') {
-        process.exit(130);
       } else {
         buffer += s;
       }
     };
-    let buffer = '';
     stdin.resume();
     stdin.setEncoding('utf8');
     stdin.on('data', onData);
+    // 输入被关掉（EOF）时不要把脚本挂住
+    stdin.on('end', () => {
+      stdin.removeListener('data', onData);
+      stdout.write('\n');
+      res(buffer.trim());
+    });
   });
 }
 
