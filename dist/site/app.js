@@ -459,7 +459,8 @@ VIEWS.cards = function (route) {
       h('span', { class: 'pill ellipsis', style: { maxWidth: '46vw' } },
         it.chapter.replace(/^第(\d+)章\s*/, '第$1章 · ')),
       it.stars ? h('span', { class: 'pill gray' }, '★'.repeat(it.stars)) : null,
-      h('span', { class: 'q-count' }, (RC.idx + 1) + ' / ' + RC.ids.length)),
+      h('button', { class: 'q-count', onClick: openCardNav, title: '卡片导航' },
+        (RC.idx + 1) + ' / ' + RC.ids.length, iconGrid())),
     h('div', { class: 'rcard' + (RC.flip ? ' flipped' : ''), onClick: flipRecall },
       h('div', { class: 'rcard-title' }, it.q),
       RC.flip
@@ -490,6 +491,84 @@ VIEWS.cards = function (route) {
 };
 
 function flipRecall() { RC.flip = !RC.flip; refreshRecall(); }
+
+/** 小宫格图标 */
+function iconGrid() {
+  const sq = (x, y) => h('rect', { x: String(x), y: String(y), width: '7', height: '7', rx: '2' });
+  return h('svg', { viewBox: '0 0 24 24', width: '15', height: '15',
+    style: { fill: 'none', stroke: 'currentColor', strokeWidth: '2' } },
+    sq(3.5, 3.5), sq(13.5, 3.5), sq(3.5, 13.5), sq(13.5, 13.5));
+}
+
+/** 卡片导航：一屏看到本轮全部卡片，点哪张跳哪张 */
+function openCardNav() {
+  if (!RC || !RC.ids.length) return;
+  const n = RC.ids.length;
+  let ok = 0, vague = 0, no = 0, fresh = 0;
+  const cells = RC.ids.map((id, i) => {
+    const s = stateOf(id);
+    if (s === 'ok') ok++; else if (s === 'vague') vague++;
+    else if (s === 'no') no++; else fresh++;
+    const it = BY_ID[id] || {};
+    const cls = ['qn'];
+    if (s) cls.push(s === 'ok' ? 'ok' : (s === 'vague' ? 'warn' : 'bad'));
+    if (i === RC.idx) cls.push('cur');
+    return h('button', {
+      class: cls.join(' '),
+      title: (i + 1) + '. ' + (it.q || '') + (it.stars ? ' ' + '★'.repeat(it.stars) : ''),
+      onClick: () => {
+        closeSheet();
+        RC.idx = i; RC.flip = false; RC.finished = false; RC.last = null;
+        $('#tbMore').hidden = false;
+        refreshRecall();
+        $('#view').scrollTop = 0;
+      }
+    }, String(i + 1));
+  });
+
+  const jumpTo = (pred) => {
+    for (let k = 1; k <= n; k++) {
+      const i = (RC.idx + k) % n;
+      if (pred(stateOf(RC.ids[i]))) {
+        closeSheet();
+        RC.idx = i; RC.flip = false; RC.finished = false; RC.last = null;
+        $('#tbMore').hidden = false;
+        refreshRecall();
+        return;
+      }
+    }
+    toast('没有符合条件的卡片');
+  };
+
+  openSheet('卡片导航', [
+    h('p', { class: 'muted tiny', style: { marginBottom: '12px' } },
+      '当前第 ' + (RC.idx + 1) + ' 张 · 共 ' + n + ' 张'),
+    h('div', { class: 'row', style: { gap: '8px', flexWrap: 'wrap', marginBottom: '12px' } },
+      h('span', { class: 'pill ok' }, '记住了 ' + ok),
+      h('span', { class: 'pill', style: { background: 'var(--warn-soft)', color: 'var(--warn)' } }, '模糊 ' + vague),
+      h('span', { class: 'pill bad' }, '没记住 ' + no),
+      h('span', { class: 'pill gray' }, '未评 ' + fresh)),
+    h('div', { class: 'row', style: { gap: '9px', marginBottom: '14px' } },
+      h('button', { class: 'btn sm', style: { flex: '1' }, onClick: () => {
+          closeSheet(); RC.idx = 0; RC.flip = false; RC.finished = false; RC.last = null;
+          refreshRecall();
+        } }, '回到第 1 张'),
+      h('button', { class: 'btn sm', style: { flex: '1' },
+        onClick: () => jumpTo(s => s === 'no' || s === 'vague') }, '跳到没记住的'),
+      h('button', { class: 'btn sm', style: { flex: '1' }, onClick: () => {
+          closeSheet(); RC.idx = n - 1; RC.flip = false; RC.finished = false; RC.last = null;
+          refreshRecall();
+        } }, '最后一张')),
+    h('div', { class: 'qgrid' }, cells),
+    h('div', { class: 'qlegend' },
+      h('span', null, '灰色=还没评'),
+      h('span', null, h('i', { class: 'g' }), '记住了'),
+      h('span', null, h('i', { class: 'w' }), '模糊'),
+      h('span', null, h('i', { class: 'r' }), '没记住'),
+      h('span', null, '紫圈=当前这张'))
+  ]);
+}
+
 function refreshRecall() {
   const v = $('#view');
   v.textContent = '';
@@ -698,6 +777,8 @@ function openHelpSheet() {
       '点标题展开答案，看完在下面点一下「没记住 / 有点模糊 / 记住了」。',
       h('span', { class: 'lbl', style: { marginTop: '12px' } }, '快速回忆'),
       '正面是考点标题，先在脑子里回忆一遍这一节的框架，点一下翻面看思维导图原文。',
+      '点右上角的「3 / 12」可以展开「卡片导航」：一屏看到本轮全部卡片，',
+      '按哪张跳哪张，也能一键回到第 1 张、跳到没记住的、或直接到最后一卡。',
       h('span', { class: 'lbl', style: { marginTop: '12px' } }, '只看没记住的'),
       '列表页顶部有开关，考前突击就靠它。',
       h('span', { class: 'lbl', style: { marginTop: '12px' } }, '数据'),
@@ -751,6 +832,9 @@ function openRecallSheet() {
     h('p', { class: 'muted tiny', style: { marginBottom: '14px' } },
       RC.title + ' · 还剩 ' + left + ' 张 · 已评 ' + (RC.ok + RC.weak + RC.wrong) + ' 张'),
     h('div', { class: 'list', style: { boxShadow: 'none', border: '1px solid var(--line)' } },
+      liRow('▦', '卡片导航', '一眼看到全部，点哪张跳哪张', () => {
+        closeSheet(); openCardNav();
+      }),
       liRow('🏁', '结束本轮，看小结', '不想背完就能先结算', () => {
         closeSheet(); RC.finished = true; $('#tbMore').hidden = true; refreshRecall();
       }),

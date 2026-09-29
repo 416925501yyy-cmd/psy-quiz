@@ -277,6 +277,7 @@ html[data-theme="dark"] .pill.gray{background:#262938}
 .qn:active{transform:scale(.93)}
 .qn.done{background:var(--accent-soft);color:var(--accent);border-color:transparent}
 .qn.ok{background:var(--ok-soft);color:var(--ok);border-color:transparent}
+.qn.warn{background:var(--warn-soft);color:var(--warn);border-color:transparent}
 .qn.bad{background:var(--bad-soft);color:var(--bad);border-color:transparent}
 .qn.cur{border-color:var(--accent);color:var(--accent);
   box-shadow:0 0 0 3px var(--accent-soft);font-weight:750}
@@ -290,6 +291,7 @@ html[data-theme="dark"] .pill.gray{background:#262938}
   background:var(--card);border:1.5px solid var(--line)}
 .qlegend i.b{background:var(--accent-soft);border-color:transparent}
 .qlegend i.g{background:var(--ok-soft);border-color:transparent}
+.qlegend i.w{background:var(--warn-soft);border-color:transparent}
 .qlegend i.r{background:var(--bad-soft);border-color:transparent}
 
 .q-stem{
