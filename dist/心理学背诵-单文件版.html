@@ -1242,113 +1242,16 @@ VIEWS.chapters = function (route) {
 
 function startItems(module, subject, ids, chapter) {
   if (!ids.length) { toast('这里还没有内容'); return; }
-  if (module === 'recall') {
-    go({ name: 'cards', module, title: chapter || subject, ids });
-  } else {
-    SET.onlyWeak = false;          // 每次进新章节都从「显示全部」开始
-    saveSet();
-    go({ name: 'list', module, subject, chapter: chapter || subject, ids });
-  }
+  go({ name: 'cards', module, title: chapter || subject, ids });
 }
 
-/* ------------------------------ 8. 列表背诵 ------------------------------ */
-
-VIEWS.list = function (route) {
-  const ids = route.ids || [];
-  const weakOnly = !!SET.onlyWeak;
-  const shown = filterIds(ids, weakOnly);
-  const st = countOf(ids);
-
-  return h('div', null,
-    h('div', { class: 'row tiny muted', style: { justifyContent: 'space-between', marginBottom: '10px' } },
-      h('span', { id: 'listHead' }, listHeadText(ids)),
-      h('span', { id: 'listPct' }, pct(st.done, ids.length) + '%')),
-    h('div', { class: 'row', style: { gap: '9px', marginBottom: '12px' } },
-      h('button', { class: 'chip' + (weakOnly ? ' on' : ''), style: { flex: '1', textAlign: 'center' },
-        onClick: () => { SET.onlyWeak = !SET.onlyWeak; saveSet(); render(current); } },
-        weakOnly ? '只看没记住 · ' + st.weak : '只看没记住的'),
-      h('button', { class: 'btn sm', style: { flex: '1' }, onClick: () => {
-          const anyClosed = shown.some(id => !OPEN[id]);
-          shown.forEach(id => { OPEN[id] = anyClosed; });
-          LS.set(K.open, OPEN);
-          render(current);
-        } }, '全部展开 / 收起')),
-    shown.length
-      ? h('div', null, ...shown.map(id => itemCard(id)))
-      : h('div', { class: 'empty' },
-          h('div', { class: 'ic' }, '🌿'),
-          h('b', null, '这里没有待巩固的内容'),
-          h('p', null, '要么都记住了，要么还没开始标记。'),
-          h('button', { class: 'btn', style: { marginTop: '16px' },
-            onClick: () => { SET.onlyWeak = false; saveSet(); render(current); } },
-            '显示全部 ' + ids.length + ' 条'))
-  );
-};
-
-function itemCard(id) {
-  const it = BY_ID[id];
-  if (!it) return null;
-  const open = !!OPEN[id];
-  const ans = h('div', { class: 'ans' }, it.a);
-  ans.hidden = !open;
-  const chev = h('span', { class: 'chev' }, open ? '⌄' : '›');
-  const s = stateOf(id);
-  return h('div', { class: 'item' + (s ? ' st-' + s : '') },
-    h('div', { class: 'item-q', onClick: () => {
-        OPEN[id] = !OPEN[id];
-        LS.set(K.open, OPEN);
-        ans.hidden = !OPEN[id];
-        chev.textContent = OPEN[id] ? '⌄' : '›';
-        const row = $('.mark-row', ans.parentNode);
-        if (row) row.hidden = !OPEN[id];
-      } },
-      h('span', { class: 'item-dot' }),
-      h('span', { class: 'item-txt' }, it.q),
-      chev),
-    ans,
-    markRow(it)
-  );
-}
-
-function markRow(it) {
-  const row = h('div', { class: 'mark-row' });
-  if (!OPEN[it.id]) row.hidden = true;
-  [['no', '没记住'], ['vague', '有点模糊'], ['ok', '记住了']].forEach(([v, label]) => {
-    row.appendChild(h('button', {
-      class: 'mark' + (stateOf(it.id) === v ? ' on ' + v : ''),
-      onClick: (e) => {
-        e.stopPropagation();
-        setState(it.id, v);
-        vibrate(8);
-        const chosen = stateOf(it.id) === v;
-        $('.mark', e.currentTarget.parentNode).forEach(b => { b.className = 'mark'; });
-        if (chosen) e.currentTarget.className = 'mark on ' + v;
-        const card = e.currentTarget.parentNode.parentNode;
-        if (card && card.className.indexOf('item') === 0) {
-          card.className = 'item' + (STUDY[it.id] ? ' st-' + STUDY[it.id] : '');
-        }
-        const head = $('#listHead'), pctEl = $('#listPct');
-        if (head && current && current.ids) {
-          head.textContent = listHeadText(current.ids);
-          if (pctEl) pctEl.textContent = pct(countOf(current.ids).done, current.ids.length) + '%';
-        }
-      }
-    }, label));
-  });
-  return row;
-}
-
-function listHeadText(ids) {
-  const st = countOf(ids);
-  return '共 ' + ids.length + ' 条 · 已学 ' + st.done + ' · 待巩固 ' + st.weak;
-}
-
-/* ------------------------------ 9. 快速回忆（翻面卡片） ------------------------------ */
+/* ------------------------------ 8. 一题一卡（名词解释 / 简答 / 综合 / 快速回忆） ------------------------------ */
 
 VIEWS.cards = function (route) {
   if (route && route.ids) {
     RC = { ids: route.ids.slice(), idx: 0, flip: false,
-           title: route.title || '快速回忆', ok: 0, weak: 0, wrong: 0,
+           title: route.title || '练习', module: route.module || 'recall',
+           ok: 0, weak: 0, wrong: 0,
            finished: false, last: null };
   }
   if (!RC || !RC.ids.length) {
@@ -1375,9 +1278,10 @@ VIEWS.cards = function (route) {
       RC.flip
         ? h('div', { class: 'rcard-body' }, h('div', { class: 'ans' }, it.a))
         : h('div', { class: 'rcard-hint' },
-            h('div', { class: 'rcard-hint-ic' }, '🧠'),
-            '先在心里回忆一遍这一节的框架',
-            h('br'), '想好了点这张卡看原文'),
+            h('div', { class: 'rcard-hint-ic' }, RC.module === 'recall' ? '🧠' : '✍️'),
+            RC.module === 'recall' ? '先在心里回忆一遍这一节的框架' : '先在心里把答案过一遍',
+            h('br'),
+            RC.module === 'recall' ? '想好了点这张卡看原文' : '想好了点这张卡看答案'),
       s ? h('div', { class: 'rcard-state ' + s },
             s === 'no' ? '上次：没记住' : (s === 'vague' ? '上次：有点模糊' : '上次：记住了')) : null),
     recallUndoBar(),
@@ -1682,14 +1586,14 @@ function openHelpSheet() {
       h('span', { class: 'lbl' }, '四个模块'),
       '名词解释（普心 120 条 + 实验 66 条）、简答、综合、快速回忆，全部出自你的备考资料。',
       '底部导航切换模块，进去先选科目、再选章节，就能一条条往下过。',
-      h('span', { class: 'lbl', style: { marginTop: '12px' } }, '名词解释 / 简答 / 综合'),
-      '点标题展开答案，看完在下面点一下「没记住 / 有点模糊 / 记住了」。',
-      h('span', { class: 'lbl', style: { marginTop: '12px' } }, '快速回忆'),
-      '正面是考点标题，先在脑子里回忆一遍这一节的框架，点一下翻面看思维导图原文。',
-      '点右上角的「3 / 12」可以展开「卡片导航」：一屏看到本轮全部卡片，',
+      h('span', { class: 'lbl', style: { marginTop: '12px' } }, '都是「一题一卡」'),
+      '正面是题目（考点标题），先在脑子里把答案过一遍，点一下翻面看答案；',
+      '然后在下面点一下「没记住 / 有点模糊 / 记住了」。',
+      h('span', { class: 'lbl', style: { marginTop: '12px' } }, '卡片导航'),
+      '点右上角的「3 / 26」展开卡片导航：一屏看到本轮全部卡片，',
       '按哪张跳哪张，也能一键回到第 1 张、跳到没记住的、或直接到最后一卡。',
-      h('span', { class: 'lbl', style: { marginTop: '12px' } }, '只看没记住的'),
-      '列表页顶部有开关，考前突击就靠它。',
+      h('span', { class: 'lbl', style: { marginTop: '12px' } }, '考前突击'),
+      '进章节后点右上角「⋯ → 只背这轮没记住的」，只过标记过「没记住 / 模糊」的题。',
       h('span', { class: 'lbl', style: { marginTop: '12px' } }, '数据'),
       '所有标记只存在本机浏览器，不上传。偶尔到「我的 → 导出备份」存一份。')
   ]);
