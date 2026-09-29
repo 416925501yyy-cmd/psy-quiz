@@ -83,7 +83,10 @@ const LS = {
   }
 };
 
-const K = { study: 'psy.study.v2', open: 'psy.open.v2', set: 'psy.set.v2', days: 'psy.days.v2' };
+const K = {
+  study: 'psy.study.v2', open: 'psy.open.v2', set: 'psy.set.v2',
+  days: 'psy.days.v2', custom: 'psy.custom.v3'
+};
 const DEFAULT_SET = { theme: 'auto', fs: 16, haptic: true, onlyWeak: false };
 let SET = Object.assign({}, DEFAULT_SET, LS.get(K.set, {}));
 let STUDY = LS.get(K.study, {});
@@ -110,32 +113,53 @@ MODULES.forEach(m => { TREE[m.id] = []; });
 
 function loadModules() {
   for (const bank of (window.__MODULES || [])) {
-    const mod = bank.module;
-    if (!MODULE_BY_ID[mod]) continue;
-    let subj = TREE[mod].find(s => s.name === bank.subject);
-    if (!subj) {
-      subj = { name: bank.subject, icon: bank.icon || '📗', desc: bank.desc || '',
-               chapters: [], ids: [] };
-      TREE[mod].push(subj);
+    if (bankOk(bank)) loadBank(bank);
+  }
+  loadCustom();
+}
+
+/** 用户自己导入的题库（存在本机，随备份一起导出） */
+function loadCustom() {
+  for (const b of LS.get(K.custom, [])) {
+    if (!bankOk(b)) continue;
+    loadBank(b);
+  }
+}
+
+function bankOk(b) {
+  return b && b.module && b.subject && Array.isArray(b.chapters);
+}
+
+/** 把一份题库塞进 TREE 里（内置的和自建的都走这里） */
+function loadBank(bank) {
+  const mod = bank.module;
+  if (!MODULE_BY_ID[mod]) return;
+  let subj = TREE[mod].find(s => s.name === bank.subject);
+  if (!subj) {
+    subj = { name: bank.subject, icon: bank.icon || '📗', desc: bank.desc || '',
+             chapters: [], ids: [], custom: !!bank.custom };
+    TREE[mod].push(subj);
+  }
+  for (const ch of bank.chapters) {
+    const name = String(ch.name || '未分类').trim();
+    let chap = subj.chapters.find(c => c.name === name);
+    if (!chap) { chap = { name, ids: [] }; subj.chapters.push(chap); }
+    for (const it of (ch.items || [])) {
+      const q = String(it.q || '').trim();
+      const a = String(it.a || '').trim();
+      if (!q || !a) continue;
+      const item = {
+        id: hash(mod + '|' + bank.subject + '|' + name + '|' + q),
+        module: mod, subject: bank.subject, chapter: name,
+        q, a, src: it.src || '', stars: it.stars || 0, custom: !!bank.custom
+      };
+      if (BY_ID[item.id]) continue;
+      ITEMS.push(item);
+      BY_ID[item.id] = item;
+      chap.ids.push(item.id);
+      subj.ids.push(item.id);
     }
-    for (const ch of (bank.chapters || [])) {
-      const chap = { name: ch.name || '未分类', ids: [] };
-      for (const it of (ch.items || [])) {
-        const q = String(it.q || '').trim();
-        const a = String(it.a || '').trim();
-        if (!q || !a) continue;
-        const item = {
-          id: hash(mod + '|' + bank.subject + '|' + chap.name + '|' + q),
-          module: mod, subject: bank.subject, chapter: chap.name,
-          q, a, src: it.src || '', stars: it.stars || 0
-        };
-        ITEMS.push(item);
-        BY_ID[item.id] = item;
-        chap.ids.push(item.id);
-        subj.ids.push(item.id);
-      }
-      if (chap.ids.length) subj.chapters.push(chap);
-    }
+    if (!chap.ids.length) subj.chapters = subj.chapters.filter(c => c !== chap);
   }
 }
 
@@ -606,6 +630,8 @@ VIEWS.me = function () {
     h('div', { class: 'sec' },
       h('div', { class: 'sec-hd' }, h('h2', null, '数据')),
       h('div', { class: 'list' },
+        liRow('📤', '导入题目', '把真题 / 自己整理的题粘进来', openImportSheet),
+        liRow('🗂', '我导入的题库', '查看或删除', openBankSheet),
         liRow('📥', '导出备份', '记录 + 设置，换手机用', openExportSheet),
         liRow('❓', '使用说明', '每个模块怎么用', openHelpSheet),
         liRow('🧹', '清空学习记录', '内容不受影响', () => confirmSheet(
@@ -621,6 +647,186 @@ VIEWS.me = function () {
       '记录只存在这台手机上，不上传、不联网也能用')
   );
 };
+
+/* ------------------------------ 导入题目 ------------------------------ */
+
+const MODULE_ALIAS = {
+  '名词解释': 'term', 'term': 'term',
+  '简答': 'short', '简答题': 'short', 'short': 'short',
+  '综合': 'comp', '综合题': 'comp', '论述': 'comp', 'comp': 'comp',
+  '快速回忆': 'recall', 'recall': 'recall'
+};
+
+const IMPORT_SAMPLE = [
+  '# 模块: 名词解释',
+  '# 科目: 广外真题',
+  '# 章节: 2023 回忆版',
+  '',
+  '1. 感觉阈限',
+  '答案：能可靠引起感觉的最小刺激量。',
+  '',
+  '2. 简述注意的分配及其条件',
+  '答案：1）同时进行的活动至少有一种是熟练的；',
+  '2）活动之间有内在联系；',
+  '3）可通过训练提高。'
+].join('\n');
+
+function openImportSheet() {
+  openSheet('导入题目', [
+    h('p', { class: 'muted tiny', style: { marginBottom: '12px', lineHeight: '1.8' } },
+      '支持两种格式：① 下面这种文本（推荐，从 Word / PDF 复制后稍作整理即可）；',
+      '② JSON（数组，或带 module / subject / chapters 的结构）。',
+      '导入的题目会追加到对应模块里，随时可以在「我导入的题库」里删除。'),
+    h('div', { class: 'field' },
+      h('label', null, '默认归属（文本里没写 # 模块 / # 科目 / # 章节 时使用）'),
+      h('div', { class: 'row', style: { gap: '8px' } },
+        h('select', { id: 'importModule',
+          style: { flex: '1', padding: '11px', borderRadius: '10px',
+                   border: '1.5px solid var(--line)', background: 'var(--card)',
+                   color: 'var(--text)', fontSize: '16px' } },
+          MODULES.map(m => h('option', { value: m.id }, m.name))),
+        h('input', { type: 'text', id: 'importSubject', value: '我的题库',
+          style: { flex: '1', width: 'auto' }, placeholder: '科目' })),
+      h('input', { type: 'text', id: 'importChapter', value: '我的补充',
+        placeholder: '章节名', style: { marginTop: '8px' } })),
+    h('div', { class: 'field' },
+      h('label', null, '粘贴内容'),
+      h('textarea', { id: 'importText', spellcheck: 'false', placeholder: '在这里粘贴题目……' })),
+    h('div', { class: 'row', style: { gap: '9px', marginBottom: '12px' } },
+      h('button', { class: 'btn sm', onClick: () => { $('#importText').value = IMPORT_SAMPLE; } }, '填入示例'),
+      h('button', { class: 'btn sm', onClick: () => { $('#importText').value = ''; } }, '清空')),
+    h('button', { class: 'btn primary', onClick: doImport }, '开始导入')
+  ]);
+}
+
+function parseImportText(text, def) {
+  const out = [];
+  let mod = def.module, subj = def.subject, chap = def.chapter, cur = null, items = [];
+
+  const flushItem = () => {
+    if (cur && cur.q.trim() && cur.a.trim()) items.push({ q: cur.q.trim(), a: cur.a.trim() });
+    cur = null;
+  };
+  const flushGroup = () => {
+    flushItem();
+    if (items.length) {
+      out.push({ module: mod, subject: subj, chapter: chap, items });
+      items = [];
+    }
+  };
+
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (!line) continue;
+    let m = line.match(/^#\s*(?:模块|module)\s*[:：]\s*(.+)$/i);
+    if (m) { flushGroup(); mod = MODULE_ALIAS[m[1].trim()] || mod; continue; }
+    m = line.match(/^#\s*(?:科目|subject)\s*[:：]\s*(.+)$/i);
+    if (m) { flushGroup(); subj = m[1].trim(); continue; }
+    m = line.match(/^#\s*(?:章节|chapter)\s*[:：]\s*(.+)$/i);
+    if (m) { flushGroup(); chap = m[1].trim(); continue; }
+    if (line[0] === '#') continue;
+
+    m = line.match(/^(?:正确)?答案\s*[:：]\s*(.*)$/);
+    if (m && cur) { cur.a = cur.a ? cur.a + '\n' + m[1].trim() : m[1].trim(); continue; }
+    m = line.match(/^(?:解析|考点|知识点)\s*[:：]\s*(.*)$/);
+    if (m && cur) { cur.a = cur.a ? cur.a + '\n' + m[1].trim() : m[1].trim(); continue; }
+
+    m = line.match(/^\d{1,3}\s*[.、)．）]\s*(.*)$/) || line.match(/^(?:题目|问)\s*[:：]\s*(.*)$/);
+    if (m) { flushItem(); cur = { q: m[1].trim(), a: '' }; continue; }
+
+    if (!cur) cur = { q: line, a: '' };
+    else if (cur.a) cur.a += '\n' + line;
+    else cur.q += ' ' + line;
+  }
+  flushGroup();
+  return out;
+}
+
+function parseImportJson(text, def) {
+  let data = JSON.parse(text);
+  const asItem = (x) => ({ q: String(x.q || x.Q || '').trim(), a: String(x.a || x.A || '').trim() });
+  const shape = (b) => {
+    if (!b || !Array.isArray(b.chapters)) throw new Error('JSON 缺少 chapters 字段');
+    return {
+      module: MODULE_ALIAS[b.module] || def.module,
+      subject: b.subject || def.subject,
+      chapter: b.chapter || def.chapter,
+      items: b.chapters.flatMap(c => (c.items || c.questions || []).map(asItem)).filter(x => x.q && x.a)
+    };
+  };
+  const list = Array.isArray(data) ? data : [data];
+  if (!list.length) throw new Error('JSON 是空的');
+  if (list[0].q && list[0].a) {          // 扁平题目数组
+    return [{ module: def.module, subject: def.subject, chapter: def.chapter,
+              items: list.map(asItem).filter(x => x.q && x.a) }];
+  }
+  return list.map(shape);
+}
+
+function doImport() {
+  const text = ($('#importText').value || '').trim();
+  if (!text) { toast('先粘贴内容再导入'); return; }
+  const def = {
+    module: $('#importModule').value,
+    subject: ($('#importSubject').value || '').trim() || '我的题库',
+    chapter: ($('#importChapter').value || '').trim() || '我的补充'
+  };
+  let groups;
+  try {
+    groups = (text[0] === '[' || text[0] === '{')
+      ? parseImportJson(text, def) : parseImportText(text, def);
+  } catch (e) { toast('解析失败：' + e.message); return; }
+
+  const banks = groups.filter(g => g.items && g.items.length).map(g => ({
+    module: g.module, subject: g.subject || def.subject, icon: '📗',
+    desc: '我自己导入的', custom: true,
+    chapters: [{ name: g.chapter || def.chapter, items: g.items }]
+  }));
+  const count = banks.reduce((n, b) => n + b.chapters[0].items.length, 0);
+  if (!count) { toast('没有解析到题目，检查一下格式'); return; }
+
+  const raw = LS.get(K.custom, []);
+  raw.push(...banks);
+  if (!LS.set(K.custom, raw)) return;
+  banks.forEach(loadBank);
+  closeSheet();
+  toast('成功导入 ' + count + ' 题 🎉', 2600);
+  render(current && current.name === 'me' ? { name: 'me' } : current);
+}
+
+function openBankSheet() {
+  const raw = LS.get(K.custom, []);
+  const countOfBank = b => (b.chapters || []).reduce((n, c) => n + (c.items || []).length, 0);
+  if (!raw.length) {
+    openSheet('我导入的题库', [
+      h('div', { class: 'empty' },
+        h('div', { class: 'ic' }, '📗'),
+        h('b', null, '还没有导入过题目'),
+        h('p', null, '在「我的 → 导入题目」里粘贴真题或自己整理的题目。'))
+    ]);
+    return;
+  }
+  openSheet('我导入的题库', [
+    h('p', { class: 'muted tiny', style: { marginBottom: '12px' } },
+      '共 ' + raw.length + ' 批 · ' + raw.reduce((n, b) => n + countOfBank(b), 0) + ' 题'),
+    ...raw.map((b, i) => h('div', { class: 'list', style: { marginBottom: '9px' } },
+      h('div', { class: 'li' },
+        h('div', { class: 'ic' }, '📗'),
+        h('div', { class: 'grow' },
+          h('b', null, (MODULE_BY_ID[b.module] || {}).name + ' · ' + b.subject),
+          h('span', null, (b.chapters || []).map(c => c.name).join('、') +
+            ' · ' + countOfBank(b) + ' 题')),
+        h('button', { class: 'chev', style: { padding: '6px 8px' },
+          onClick: () => confirmSheet('删除这批题目',
+            '会删除这批题目连同它们的学习标记。确定吗？', '删除', () => {
+              const arr = LS.get(K.custom, []);
+              arr.splice(i, 1);
+              LS.set(K.custom, arr);
+              toast('已删除，正在重新加载…');
+              setTimeout(() => location.reload(), 700);
+            }) }, '🗑'))))
+  ]);
+}
 
 function openExportSheet() {
   const dump = JSON.stringify({

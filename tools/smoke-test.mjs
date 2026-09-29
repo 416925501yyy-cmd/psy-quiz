@@ -1,7 +1,6 @@
-/* 功能冒烟测试：用一个极简 DOM 模拟把 app.js 真正跑起来，
-   逐页渲染、点击、答题、导入题库，确认没有运行时报错。
+/* 功能冒烟测试：用极简 DOM 模拟把 app.js 真正跑起来，逐页渲染、答题、导入，确认没有运行时报错。
    运行：node tools/smoke-test.mjs */
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
@@ -16,16 +15,13 @@ class Style {
   setProperty(k, v) { this._props[k] = v; this[k] = v; }
   getPropertyValue(k) { return this._props[k] || ''; }
 }
-
 class NodeBase {}
-
 class TextNode extends NodeBase {
   constructor(text) { super(); this.nodeType = 3; this.data = String(text); this.parentNode = null; }
   get textContent() { return this.data; }
   set textContent(v) { this.data = String(v); }
   get children() { return []; }
 }
-
 class ClassList {
   constructor(el) { this.el = el; this.set = new Set(); }
   add(...c) { c.forEach((x) => x && this.set.add(x)); return this; }
@@ -37,7 +33,6 @@ class ClassList {
     return on;
   }
 }
-
 class Element extends NodeBase {
   constructor(tag, doc) {
     super();
@@ -115,10 +110,7 @@ class Element extends NodeBase {
   descendants() {
     const out = [];
     const walk = (n) => {
-      for (const c of n.children) {
-        if (c.nodeType === 1) out.push(c);
-        walk(c);
-      }
+      for (const c of n.children) { if (c.nodeType === 1) out.push(c); walk(c); }
     };
     walk(this);
     return out;
@@ -144,9 +136,9 @@ class Element extends NodeBase {
     for (const d of this.descendants()) {
       if (!d.matches(parts[parts.length - 1])) continue;
       if (parts.length === 1) return d;
-      let p = d.parentNode, ok = false;
-      while (p) { if (p.matches(parts[0])) { ok = true; break; } p = p.parentNode; }
-      if (ok) return d;
+      let p = d.parentNode, hit = false;
+      while (p) { if (p.matches(parts[0])) { hit = true; break; } p = p.parentNode; }
+      if (hit) return d;
     }
     return null;
   }
@@ -161,7 +153,6 @@ class Element extends NodeBase {
     });
   }
 }
-
 class Document extends Element {
   constructor() {
     super('#document', null);
@@ -171,14 +162,12 @@ class Document extends Element {
     this.body = new Element('body', this);
     this.appendChild(this.documentElement);
     this.appendChild(this.body);
-    this._listeners = {};
   }
   createElement(tag) { return new Element(tag, this); }
   createElementNS(ns, tag) { const el = new Element(tag, this); el._ns = ns; return el; }
   createTextNode(text) { return new TextNode(text); }
 }
 
-/** 从 index.html 里搭出应用需要的静态骨架（只取 id / class 元素，展平即可） */
 function buildSkeleton(document, html) {
   const SKIP = new Set(['html', 'head', 'meta', 'link', 'title', 'script', 'style', 'body', 'svg']);
   const tagRe = /<([a-zA-Z][\w-]*)((?:\s+[^<>]*?)?)\/?>/g;
@@ -186,8 +175,7 @@ function buildSkeleton(document, html) {
   while ((m = tagRe.exec(html))) {
     const tag = m[1].toLowerCase();
     const attrs = m[2] || '';
-    if (SKIP.has(tag)) continue;
-    if (!/(id|class)=/.test(attrs)) continue;
+    if (SKIP.has(tag) || !/(id|class)=/.test(attrs)) continue;
     const el = document.createElement(tag);
     const attrRe = /([\w:-]+)(?:\s*=\s*"([^"]*)")?/g;
     let a;
@@ -201,7 +189,7 @@ function makeEnv(html) {
   buildSkeleton(document, html);
   const store = new Map();
   const win = {
-    __BANKS: [],
+    __MODULES: [],
     matchMedia: () => ({ matches: false, addEventListener() {} }),
     addEventListener() {},
     location: { protocol: 'file:', href: 'file:///index.html' },
@@ -213,7 +201,8 @@ function makeEnv(html) {
       removeItem: (k) => store.delete(k),
       clear: () => store.clear()
     },
-    setTimeout, clearTimeout, console, URL: { createObjectURL: () => 'blob:x', revokeObjectURL() {} },
+    setTimeout, clearTimeout, console,
+    URL: { createObjectURL: () => 'blob:x', revokeObjectURL() {} },
     Blob: class { constructor(p) { this.parts = p; } }
   };
   win.window = win;
@@ -223,7 +212,7 @@ function makeEnv(html) {
   return { win, document, store };
 }
 
-/* ============================ 测试框架 ============================ */
+/* ============================ 断言 ============================ */
 
 let pass = 0;
 const fails = [];
@@ -231,347 +220,172 @@ function ok(cond, label) {
   if (cond) { pass++; console.log('  ✓ ' + label); }
   else { fails.push(label); console.log('  ✗ ' + label); }
 }
-function findByText(root, text, tag) {
+const all = (root, sel) => root.querySelectorAll(sel);
+function byText(root, text, tag) {
   const cands = root.descendants().filter((e) =>
     (!tag || e.tagName === tag.toUpperCase()) && e.textContent.includes(text));
   cands.sort((a, b) => a.textContent.length - b.textContent.length);
   return cands[0] || null;
 }
-function clickByText(root, text, tag) {
-  const el = findByText(root, text, tag || 'button');
-  if (!el) throw new Error('找不到按钮：' + text);
+function clickText(root, text, tag) {
+  const el = byText(root, text, tag || 'button');
+  if (!el) throw new Error('找不到可点元素：' + text);
   el.click();
   return el;
 }
 
-/* ============================ 跑起来 ============================ */
+/* ============================ 跑 ============================ */
 
 const env = makeEnv(read('index.html'));
 const ctx = vm.createContext(env.win);
-const errors = [];
-
 try {
-  vm.runInContext(read('data/bank-general.js'), ctx, { filename: 'bank-general.js' });
-  vm.runInContext(read('data/bank-experimental.js'), ctx, { filename: 'bank-experimental.js' });
-  vm.runInContext(read('data/recite-general.js'), ctx, { filename: 'recite-general.js' });
-  vm.runInContext(read('data/recite-experimental.js'), ctx, { filename: 'recite-experimental.js' });
+  for (const f of readdirSync(resolve(ROOT, 'data')).filter((n) => n.endsWith('.js')).sort()) {
+    vm.runInContext(read('data/' + f), ctx, { filename: f });
+  }
   vm.runInContext(read('app.js'), ctx, { filename: 'app.js' });
 } catch (e) {
-  console.error('加载 app.js 就报错了：', e);
+  console.error('加载就报错了：', e);
   process.exit(1);
 }
 
 const D = env.win.document;
 const view = D.querySelector('#view');
+const tabbar = D.querySelector('#tabbar');
+const q = (sel) => view.querySelector(sel);
 
-console.log('\n【1】首屏渲染');
-ok(!!view, '找到 #view 容器');
-ok(view.children.length > 0, '首屏有内容渲染出来');
-const homeText = view.textContent;
-ok(homeText.includes('普通心理学'), '首页出现「普通心理学」');
-ok(homeText.includes('实验心理学'), '首页出现「实验心理学」');
-ok(homeText.includes('432'), '首页显示题库总数 432');
-ok(D.querySelector('#tbTitle').textContent === '心理学刷题', '顶栏标题正确');
+console.log('\n【1】首屏');
+ok(view.children.length > 0, '首屏有内容');
+ok(view.textContent.includes('名词解释'), '默认进名词解释模块');
+ok(tabbar.hidden === false, '模块首页显示底部导航');
+ok(all(D, '.tab').length === 5, '底部 5 个 tab');
+const total = env.win.__MODULES.reduce((n, b) =>
+  n + b.chapters.reduce((m, c) => m + c.items.length, 0), 0);
+const termTotal = env.win.__MODULES.filter((b) => b.module === 'term')
+  .reduce((n, b) => n + b.chapters.reduce((m, c) => m + c.items.length, 0), 0);
+ok(view.textContent.includes(String(termTotal)), '名词解释首页显示本模块条数 ' + termTotal);
+ok(total === 447, '四个模块合计 ' + total + ' 条');
 
-console.log('\n【2】进入科目与章节');
-const subjBtn = view.descendants().find((e) => e.classList.contains('subj'));
-ok(!!subjBtn, '找到科目卡片');
-subjBtn.click();
-ok(view.textContent.includes('第1章 心理学研究什么'), '进入普通心理学章节列表');
-const chapLi = view.descendants().find((e) =>
-  e.tagName === 'BUTTON' && e.textContent.includes('第3章 感觉'));
-ok(!!chapLi, '找到「第3章 感觉」章节');
-chapLi.click();
-
-console.log('\n【3】刷题：单选');
-ok(view.textContent.includes('单选'), '进入答题页，显示题型「单选」');
-ok(view.textContent.includes('感觉是人脑对直接作用于感觉器官'), '显示第一题题干');
-let opts = view.querySelectorAll('.opt');
-ok(opts.length === 4, '渲染出 4 个选项');
-ok(!view.textContent.includes('正确答案'), '答题前不显示答案');
-opts[0].click();   // 第 1 题正确答案就是 A
-ok(view.textContent.includes('答对了'), '选对后立即显示「答对了」');
-ok(view.textContent.includes('正确答案'), '显示正确答案与解析');
-
-console.log('\n【4】刷题：切题与多选');
-clickByText(view, '下一题');
-ok(view.textContent.includes('2 / 20'), '切到第 2 题，进度显示 2 / 20');
-
-/** 点当前页上可用的前进按钮（跳过 / 下一题 / 看答案 / 提交答案），返回点了哪个 */
-function stepForward() {
-  for (const label of ['跳过', '看答案', '下一题', '提交答案', '完成练习']) {
-    const el = findByText(view, label, 'button');
-    if (el && !el.getAttribute('disabled')) { el.click(); return label; }
-  }
-  return null;
+console.log('\n【2】四个模块');
+for (const [id, name] of [['short', '简答'], ['comp', '综合'], ['recall', '快速回忆'], ['term', '名词解释']]) {
+  all(D, '.tab').find((t) => t.dataset.tab === id).click();
+  ok(view.textContent.includes(name), name + ' 模块能打开');
 }
 
-let guard = 0, reached = '';
-while (guard++ < 60) {
-  if (view.textContent.includes('多选') && !view.textContent.includes('正确答案')) { reached = '多选'; break; }
-  if (!stepForward()) break;
-}
-ok(reached === '多选', '能翻到多选题');
-if (reached === '多选') {
-  opts = view.querySelectorAll('.opt');
-  ok(opts.length === 4, '多选题也是 4 个选项');
-  ok(!findByText(view, '提交答案', 'button'), '未选择时不显示「提交答案」');
-  opts.forEach((o) => o.click());
-  ok(!!findByText(view, '提交答案', 'button'), '选了选项后出现「提交答案」按钮');
-  clickByText(view, '提交答案');
-  ok(view.textContent.includes('正确答案'), '多选提交后给出判定与答案');
-  ok(view.textContent.includes('答对了') || view.textContent.includes('答错了'), '多选判定结果显示正常');
-}
+console.log('\n【3】进章节 → 出卡片');
+const subj = all(view, '.subj')[0];
+ok(!!subj, '有科目入口');
+subj.click();
+ok(view.textContent.includes('章'), '进入章节列表');
+ok(all(view, '.li').length > 0, '列出 ' + all(view, '.li').length + ' 个章节');
+all(view, '.li')[2].click();
+ok(!!q('.rcard'), '进入一题一卡界面');
+ok(!!q('.rcard-title'), '卡片正面显示题目');
+ok(!q('.ans'), '未翻面时不显示答案');
+const c1 = q('.q-count').textContent.trim();
+ok(/^1 \/ \d+/.test(c1), '计数器从 1 开始：' + c1);
 
-console.log('\n【4.5】题目导航（答题卡）');
-const countBtn = view.querySelector('.q-count');
-ok(!!countBtn, '答题页右上角题号可点击');
-countBtn.click();
-const navBody = D.querySelector('#sheetBody');
-ok(D.querySelector('#sheetMask').hidden === false, '打开题目导航弹层');
-const nums = navBody.querySelectorAll('.qn');
-ok(nums.length === 20, '列出这一章全部 20 道题（实际 ' + nums.length + '）');
-ok(!!findByText(navBody, '回到第 1 题', 'button'), '有「回到第 1 题」按钮');
-ok(!!findByText(navBody, '跳到未做题', 'button'), '有「跳到未做题」按钮');
-ok(!!findByText(navBody, '最后一题', 'button'), '有「最后一题」按钮');
-nums[11].click();
-ok(view.textContent.includes('12 / 20'), '点第 12 格直接跳到第 12 题');
-ok(D.querySelector('#sheetMask').hidden === true, '跳转后弹层自动收起');
-view.querySelector('.q-count').click();
-clickByText(D.querySelector('#sheetBody'), '回到第 1 题');
-ok(view.textContent.includes('1 / 20'), '一键回到第 1 题');
-// 跨章节练习（每日一练）会出现章节分组
-D.querySelector('#tbMore').click();
-clickByText(D.querySelector('#sheetBody'), '先歇一会儿');
-clickByText(view, '每日一练');
-view.querySelector('.q-count').click();
-const dailyBody = D.querySelector('#sheetBody');
-ok(dailyBody.querySelectorAll('.qn').length === 15, '每日一练的导航列出 15 题');
-ok(dailyBody.querySelectorAll('.qgrid').length === 1, '所有题号放在同一个网格里（一屏看完）');
-ok(dailyBody.textContent.includes('每日一练'), '标题显示当前练习名称与所在章节');
-ok(/title/.test(Object.keys(dailyBody.querySelectorAll('.qn')[0]._attrs).join())
-  || dailyBody.querySelectorAll('.qn')[0].getAttribute('title') !== null,
-  '每个题号带章节/题干提示');
-clickByText(dailyBody, '回到第 1 题');
-// 回到「第3章 感觉」这一套，继续后面的测试
-D.querySelector('#tbMore').click();
-clickByText(D.querySelector('#sheetBody'), '先歇一会儿');
-view.querySelector('.subj').click();
-clickByText(view, '第3章 感觉');
-ok(view.textContent.includes('1 / 20'), '重新进入第3章，回到第 1 题');
-
-console.log('\n【5】主观题（名词解释）');
-guard = 0;
-while (guard++ < 80) {
-  if (view.textContent.includes('名词解释') && findByText(view, '看答案', 'button')) break;
-  if (view.textContent.includes('名词解释') && view.textContent.includes('参考答案')) break;
-  if (!stepForward()) break;
-}
-ok(view.textContent.includes('名词解释'), '能翻到名词解释题');
-ok(!!findByText(view, '看答案', 'button'), '主观题先显示「看答案」而不是直接给答案');
-ok(!view.textContent.includes('参考答案'), '点开之前不显示参考答案');
-clickByText(view, '看答案');
-ok(view.textContent.includes('参考答案'), '点开后显示参考答案');
-ok(!!findByText(view, '背下来了', 'button'), '出现自我评价按钮');
-clickByText(view, '背下来了');
-ok(view.textContent.includes('背下来了'), '自我评价点击成功');
-
-console.log('\n【6】结束练习与成绩单');
-D.querySelector('#tbMore').click();
-ok(D.querySelector('#sheetMask').hidden === false, '点 ⋯ 弹出练习菜单');
-clickByText(D.querySelector('#sheetBody'), '结束这次练习');
-ok(view.textContent.includes('正确率'), '进入成绩单页');
-ok(view.textContent.includes('答对') && view.textContent.includes('答错'), '成绩单显示答对 / 答错');
-const ringCircles = view.querySelectorAll('circle');
-ok(ringCircles.length === 2, '正确率环形图画出两个圆（实际 ' + ringCircles.length + '）');
-ok(ringCircles.length === 2 && ringCircles.every((c) => c._ns === 'http://www.w3.org/2000/svg'),
-  '环形图使用 SVG 命名空间（否则浏览器不渲染）');
-ok(ringCircles.length === 2 && ringCircles[1].style.stroke && ringCircles[1].style.strokeWidth === '10',
-  '环形图进度用内联样式设置描边');
-
-console.log('\n【7】错题本与统计');
-const tabs = D.querySelectorAll('.tab');
-ok(tabs.length === 5, '底部有 5 个 tab（含背诵）');
-tabs.find((t) => t.dataset.tab === 'wrong').click();
-ok(view.textContent.includes('错题'), '错题本页面渲染正常');
-tabs.find((t) => t.dataset.tab === 'stats').click();
-ok(view.textContent.includes('累计正确率'), '统计页显示累计正确率');
-ok(view.textContent.includes('近 7 天') || view.textContent.includes('连续打卡'), '统计页显示刷题量 / 打卡');
-tabs.find((t) => t.dataset.tab === 'me').click();
-ok(view.textContent.includes('刷题设置'), '我的页面渲染正常');
-
-console.log('\n【7.5】背诵手册');
-const cardTotal = env.win.__RECITE.reduce((n, b) =>
-  n + b.chapters.reduce((m, c) => m + c.cards.length, 0), 0);
-tabs.find((t) => t.dataset.tab === 'recite').click();
-ok(view.textContent.includes('今天要背的'), '背诵首页渲染');
-ok(view.textContent.includes('普通心理学') && view.textContent.includes('实验心理学'),
-  '背诵首页列出两个科目');
-ok(view.textContent.includes('共 ' + cardTotal + ' 张考点卡片'), '显示卡片总数 ' + cardTotal + '（' +
-  (view.textContent.match(/共 (\d+) 张考点卡片/) || [])[1] + '）');
-ok(!!findByText(view, '开始今日背诵', 'button'), '有「开始今日背诵」按钮');
-ok(!!findByText(view, '考点速查', 'button'), '有「考点速查」入口');
-
-// 开始背卡片
-const startBtn = view.descendants().find((e) =>
-  e.tagName === 'BUTTON' && /开始今日背诵/.test(e.textContent));
-startBtn.click();
-ok(D.querySelector('#tbTitle').textContent === '今日背诵', '进入卡片背诵页');
-ok(!!view.querySelector('.rcard'), '渲染出卡片');
-ok(!!findByText(view, '先在心里默背一遍', 'div'), '卡片正面显示默背提示');
-ok(!!findByText(view, '看要点', 'button'), '正面有「看要点」按钮');
-ok(!view.textContent.includes('💡') || true, '（正面不显示要点）');
-
-view.querySelector('.rcard').click();
-ok(!!view.querySelector('.rcard').classList.contains('flipped'), '点一下卡片翻面');
-ok(!!findByText(view, '记住了', 'button'), '翻面后出现三档评价按钮');
-ok(!!findByText(view, '有点模糊', 'button'), '有「有点模糊」');
-ok(!!findByText(view, '没记住', 'button'), '有「没记住」');
-
-const progressBefore = view.querySelector('.q-count').textContent.trim();
-clickByText(view, '记住了');
-const progressAfter = view.querySelector('.q-count').textContent.trim();
-ok(progressBefore !== progressAfter, '打分后自动进入下一张（' + progressBefore + ' → ' + progressAfter + '）');
-
-// 记录写入了本地存储
-const reciteRaw = env.win.localStorage.getItem('psy.recite.v1');
-ok(!!reciteRaw && Object.keys(JSON.parse(reciteRaw)).filter(k => !k.startsWith('open:')).length === 1,
+console.log('\n【4】翻面 → 标记 → 自动跳下一题');
+q('.rcard').click();
+ok(!!q('.ans'), '点卡片翻面后显示答案');
+ok(!!byText(view, '记住了', 'button'), '出现三档标记按钮');
+clickText(view, '记住了', 'button');
+const c2 = q('.q-count').textContent.trim();
+ok(c2 !== c1, '打标记后自动跳到下一题（' + c1 + ' → ' + c2 + '）');
+ok(!q('.ans'), '新的一题默认不显示答案');
+ok(Object.keys(JSON.parse(env.win.localStorage.getItem('psy.study.v2') || '{}')).length === 1,
   '掌握度写入本地存储');
-const rec = JSON.parse(reciteRaw || '{}');
-const recId = Object.keys(rec).find(k => !k.startsWith('open:'));
-ok(recId && rec[recId].box === 1, '「记住了」使档位升到 1（' + (recId ? rec[recId].box : '?') + '）');
-ok(recId && rec[recId].due > Date.now(), '下次复习时间排到了未来');
 
-// —— 打分撤销 ——
-const undoEl = view.querySelector('.undo-bar');
-ok(!!undoEl, '打分后出现「撤销」条');
-ok(undoEl.textContent.includes('记住了'), '撤销条写明上一张标的是什么');
-undoEl.click();
-ok(view.querySelector('.rcard').classList.contains('flipped'), '撤销后回到那张卡并保持翻面');
-ok(view.querySelector('.q-count').textContent.trim().startsWith('1 /'), '撤销后回到原来那张卡');
-ok(!view.querySelector('.undo-bar'), '撤销后撤销条消失');
-const recAfterUndo = JSON.parse(env.win.localStorage.getItem('psy.recite.v1') || '{}');
-ok(Object.keys(recAfterUndo).filter((k) => !k.startsWith('open:')).length === 0,
-  '撤销后这条掌握度记录被清掉');
+console.log('\n【5】卡片导航');
+q('.q-count').click();
+ok(D.querySelector('#sheetMask').hidden === false, '打开卡片导航');
+const cells = all(D.querySelector('#sheetBody'), '.qn');
+ok(cells.length === Number(c1.split('/')[1].trim()), '导航格子数 = 本轮卡片数（' + cells.length + '）');
+ok(!!byText(D.querySelector('#sheetBody'), '跳到没记住的', 'button'), '有「跳到没记住的」');
+ok(!!byText(D.querySelector('#sheetBody'), '最后一张', 'button'), '有「最后一张」');
+cells[cells.length - 1].click();
+ok(q('.q-count').textContent.trim().startsWith(String(cells.length)), '点最后一格能跳过去');
+ok(D.querySelector('#sheetMask').hidden === true, '跳转后弹层收起');
+q('.q-count').click();
+clickText(D.querySelector('#sheetBody'), '回到第 1 张', 'button');
+ok(q('.q-count').textContent.trim().startsWith('1 /'), '一键回到第 1 张');
 
-// —— 继续背几张 ——
-let guard2 = 0;
-while (guard2++ < 3) {
-  const card = view.querySelector('.rcard');
-  if (!card.classList.contains('flipped')) card.click();
-  clickByText(view, '记住了');
-}
-const recAfter3 = JSON.parse(env.win.localStorage.getItem('psy.recite.v1') || '{}');
-ok(Object.keys(recAfter3).filter((k) => !k.startsWith('open:')).length === 3, '连续背 3 张都写入了记录');
-
-// —— 中途结算 ——
-ok(D.querySelector('#tbMore').hidden === false, '背诵中途显示 ⋯ 菜单按钮');
+console.log('\n【6】撤销与中途结算');
+q('.rcard').click();
+clickText(view, '没记住', 'button');
+ok(!!q('.undo-bar'), '打分后出现撤销条');
+q('.undo-bar').click();
+ok(!q('.undo-bar'), '撤销后撤销条消失');
+ok(!!q('.ans'), '撤销后回到那张卡并保持翻面');
 D.querySelector('#tbMore').click();
-ok(D.querySelector('#sheetMask').hidden === false, '能打开本轮设置菜单');
-ok(!!findByText(D.querySelector('#sheetBody'), '结束本轮，看小结', 'button'), '菜单里有「结束本轮，看小结」');
-clickByText(D.querySelector('#sheetBody'), '结束本轮，看小结');
-ok(/张卡片/.test(view.textContent), '中途结算进入小结页');
-ok(/记住了[\s\S]*模糊[\s\S]*没记住/.test(view.textContent), '小结显示三档统计');
-ok(D.querySelector('#tbMore').hidden === true, '小结页收起 ⋯ 按钮');
-ok(!!view.querySelector('.undo-bar'), '小结页也能撤销最后一笔');
+ok(D.querySelector('#sheetMask').hidden === false, '卡片页 ⋯ 能打开本轮设置');
+ok(!!byText(D.querySelector('#sheetBody'), '结束本轮，看小结', 'button'), '有「结束本轮，看小结」');
+clickText(D.querySelector('#sheetBody'), '结束本轮，看小结', 'button');
+ok(view.textContent.includes('记住了') && view.textContent.includes('没记住'), '小结显示三档统计');
 
-// 考点速查
-clickByText(view, '回到背诵首页');
-clickByText(view, '考点速查');
-ok(D.querySelector('#tbTitle').textContent === '考点速查', '进入考点速查');
-ok(view.querySelectorAll('.chip').length === 6, '有 6 个题型筛选（实际 ' +
-  view.querySelectorAll('.chip').length + '）');
-ok(view.textContent.includes('共 ' + cardTotal + ' 个考点'), '列出全部 ' + cardTotal + ' 个考点');
-const firstItem = view.querySelector('.rc-item .li');
-ok(!!firstItem, '考点列表有可展开的条目');
-ok(view.querySelector('.rc-item-body').hidden === true, '默认收起');
-firstItem.click();
-ok(view.querySelector('.rc-item-body').hidden === false, '点标题能展开要点');
-ok(!!view.querySelector('.rc-item-body .rcard-answer').textContent.trim(), '展开后能看到要点正文');
-firstItem.click();
-ok(view.querySelector('.rc-item-body').hidden === true, '再点一下又收起来');
-
-console.log('\n【8】导入题库（文本解析）');
-const meTab = tabs.find((t) => t.dataset.tab === 'me');
-meTab.click();
-clickByText(view, '导入题目');
-ok(D.querySelector('#sheetMask').hidden === false, '导入弹层打开');
-const ta = D.querySelector('#importText');
-ok(!!ta, '找到粘贴框');
-ta.value = [
-  '# 科目: 实验心理学',
-  '# 章节: 测试导入章',
-  '',
-  '1. 唐德斯的 A 反应时是指？',
-  'A. 简单反应时',
-  'B. 选择反应时',
-  'C. 辨别反应时',
-  'D. 复杂反应时',
-  '答案：A',
-  '解析：A 反应时即简单反应时。',
-  '',
-  '2. 减数法可以分离出心理加工的各个阶段。',
-  '答案：对',
-  '',
-  '名词解释：加因素法',
-  '答案：加因素法由斯滕伯格提出，通过考察因素间是否存在交互作用来确定心理加工的各个阶段。',
-  '',
-  '简答：简述反应时的影响因素',
-  '答案：刺激强度、复杂程度、准备状态、练习、动机和个体差异等。'
-].join('\n');
-D.querySelector('#importChapter').value = '测试导入章';
-clickByText(D.querySelector('#sheetBody'), '开始导入');
-const customRaw = env.win.localStorage.getItem('psy.custom.v1');
-ok(!!customRaw, '自建题库已写入本地存储');
-if (customRaw) {
-  const banks = JSON.parse(customRaw);
-  const items = banks.flatMap((b) => b.chapters.flatMap((c) => c.items));
-  ok(items.length === 4, '解析出 4 道题（实际 ' + items.length + '）');
-  ok(items[0].o && items[0].o.length === 4, '单选题选项解析正确');
-  ok(items[0].a === 'A', '单选题答案解析正确');
-  ok(items[1].q.includes('减数法') && items[1].a === '对', '判断题解析正确');
-  ok(items[2].q === '加因素法' && items[2].a.includes('斯滕伯格'), '名词解释解析正确');
-  ok(items[3].q.includes('反应时的影响因素'), '简答解析正确');
-}
-
-console.log('\n【9】导出备份');
-tabs.find((t) => t.dataset.tab === 'me').click();
-clickByText(view, '导出备份');
-const dump = D.querySelector('#exportText');
-ok(!!dump, '导出弹层打开');
+console.log('\n【7】我的页与导出');
+all(D, '.tab').find((t) => t.dataset.tab === 'me').click();
+ok(view.textContent.includes('导入题目'), '我的页有导入入口');
+ok(view.textContent.includes('导出备份'), '我的页有导出入口');
+clickText(view, '导出备份', 'button');
 let parsed = null;
-try { parsed = JSON.parse(dump.value); } catch (e) {}
-ok(parsed && parsed.app === 'psych-quiz', '导出的 JSON 结构正确');
-ok(parsed && parsed.prog && Object.keys(parsed.prog).length > 0, '备份里包含做题记录');
-
-console.log('\n【10】题库结构');
+try { parsed = JSON.parse(D.querySelector('#exportText').value); } catch (e) {}
+ok(parsed && parsed.app === 'psy-recite', '导出的 JSON 结构正确');
+ok(parsed && parsed.study && Object.keys(parsed.study).length > 0, '备份里包含学习记录');
 D.querySelector('#sheetClose').click();
-clickByText(view, '查看题库结构');
-ok(D.querySelector('#sheetBody').textContent.includes('普通心理学'), '题库结构弹层能列出各科目');
 
-console.log('\n【11】题库自检数据完整性');
-const banks = env.win.__BANKS;
-let bad = 0, total = 0;
-for (const b of banks) {
+console.log('\n【8】导入题目');
+clickText(view, '导入题目', 'button');
+ok(D.querySelector('#sheetMask').hidden === false, '导入弹层打开');
+D.querySelector('#importText').value = [
+  '# 模块: 名词解释',
+  '# 科目: 广外真题',
+  '# 章节: 2023 回忆版',
+  '',
+  '1. 朝向反射',
+  '答案：由新异刺激引起的一种复杂而又特殊的反射。',
+  '',
+  '2. 简述注意的分配及其条件',
+  '答案：1）同时进行的活动至少有一种是熟练的；',
+  '2）活动之间有内在联系；',
+  '3）可通过训练提高。'
+].join('\n');
+clickText(D.querySelector('#sheetBody'), '开始导入', 'button');
+const custom = JSON.parse(env.win.localStorage.getItem('psy.custom.v3') || '[]');
+ok(custom.length === 1, '自建题库已写入本地存储');
+const items = custom[0] && custom[0].chapters[0].items;
+ok(items && items.length === 2, '解析出 2 道题（实际 ' + (items ? items.length : 0) + '）');
+ok(items && items[0].q === '朝向反射', '第一题题干正确');
+ok(items && items[0].a.includes('新异刺激'), '第一题答案正确');
+ok(items && items[1].a.includes('熟练'), '多行答案正确合并');
+
+console.log('\n【9】导入的题能用');
+all(D, '.tab').find((t) => t.dataset.tab === 'term').click();
+const customSubj = all(view, '.subj').find((s) => s.textContent.includes('广外真题'));
+ok(!!customSubj, '导入的科目出现在名词解释模块里');
+customSubj.click();
+ok(view.textContent.includes('2023 回忆版'), '导入的章节出现在列表里');
+all(view, '.li')[0].click();
+ok(q('.rcard-title').textContent.includes('朝向反射'), '能进入导入题目的卡片');
+
+console.log('\n【10】数据完整性');
+const MOD = { term: 0, short: 0, comp: 0, recall: 0 };
+let bad = 0;
+for (const b of env.win.__MODULES) {
   for (const c of b.chapters) {
     for (const it of c.items) {
-      total++;
-      const n = (it.o || []).length;
-      if (it.t === 'single' && (!Number.isInteger(it.a) || it.a < 0 || it.a >= n)) bad++;
-      if (it.t === 'multiple' && (!Array.isArray(it.a) || it.a.some((v) => v >= n))) bad++;
-      if ((it.o || []).some((x) => String(x).trim() === '')) bad++;
+      MOD[b.module] = (MOD[b.module] || 0) + 1;
+      if (!it.q || !it.a) bad++;
     }
   }
 }
-ok(bad === 0, `全部 ${total} 道题答案与选项匹配（异常 ${bad} 处）`);
+ok(bad === 0, '全部内容都有题目和答案');
+ok(MOD.term === 186, '名词解释 186 条（实际 ' + MOD.term + '）');
+ok(MOD.short === 136, '简答 136 题（实际 ' + MOD.short + '）');
+ok(MOD.comp === 31, '综合 31 题（实际 ' + MOD.comp + '）');
+ok(MOD.recall === 94, '快速回忆 94 张（实际 ' + MOD.recall + '）');
 
-/* ============================ 汇总 ============================ */
 console.log('\n' + '─'.repeat(52));
-if (errors.length) {
-  console.log('运行期捕获到异常：');
-  for (const e of errors) console.log('  ' + e.message);
-}
-if (fails.length || errors.length) {
+if (fails.length) {
   console.log(`失败 ${fails.length} 项：`);
   for (const f of fails) console.log('  ✗ ' + f);
   process.exitCode = 1;
